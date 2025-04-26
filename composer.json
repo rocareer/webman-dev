@@ -12,6 +12,7 @@
       "Rocareer\\WebmanDev\\": "src"
     }
   },
+
   "minimum-stability": "dev",
   "prefer-stable": true
 }

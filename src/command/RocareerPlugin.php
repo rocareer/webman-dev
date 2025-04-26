@@ -4,6 +4,7 @@ namespace Rocareer\WebmanDev\command;
 
 use Rocareer\Support\Filesystem;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -13,99 +14,101 @@ use RecursiveIteratorIterator;
 use Symfony\Component\Console\Question\ConfirmationQuestion;
 use think\File;
 
-class RocareerExport extends Command
+class RocareerPlugin extends Command
 {
-    protected static $defaultName = 'rocareer:export';
+    protected static $defaultName = 'rocareer:plugin';
     protected static $defaultDescription = 'Synchronize test1 and test directories using Filesystem';
 
-    protected static $source = 'plugin/radmin';
-    protected static $target = 'vendor/rocareer/radmin/src/plugin/radmin';
 
+
+    protected $dirs = [
+
+
+    ];
+    protected static $configPath=[
+        'config/plugin/rocareer/'=>'vendor/rocareer/radmin/src/config/plugin/rocareer/'
+    ];
+    protected static $pluginPath=[
+        'plugin/' => 'vendor/rocareer/radmin/src/plugin/',
+    ];
 
     protected function configure()
     {
+        $this->addArgument('name', InputArgument::REQUIRED, 'Rocareer plugin name');
         $this->addOption(
             'force',
             'f',
             InputOption::VALUE_NONE,
             'Force deletion without confirmation'
         );
-    }
-
-    /**
-     * 查找需要删除的文件和目录
-     */
-    protected function findFilesToDelete(array $sourceFiles, array $targetFiles, string $targetPath): array
-    {
-        $toDelete = ['files' => [], 'dirs' => []];
-
-        // 找出需要删除的文件
-        foreach ($targetFiles as $path => $info) {
-            if (!$info['is_dir'] && !isset($sourceFiles[$path])) {
-                $toDelete['files'][] = $path;
-            }
-        }
-
-        // 找出需要删除的目录（自底向上）
-        $dirsToCheck = array_filter($targetFiles, function ($f) {
-            return $f['is_dir'];
-        });
-        krsort($dirsToCheck); // 反向排序确保先处理子目录
-
-        foreach ($dirsToCheck as $path => $info) {
-            if (!isset($sourceFiles[$path])) {
-                $toDelete['dirs'][] = $path;
-            }
-        }
-
-        return $toDelete;
-    }
-
-    /**
-     * 确认删除操作
-     */
-    protected function confirmDeletion(InputInterface $input, OutputInterface $output): bool
-    {
-        $question = new ConfirmationQuestion(
-            '<question>Are you sure you want to delete these items? (y/n)</question> ',
-            false
+        $this->addOption(
+            'install',
+            'i',
+            InputOption::VALUE_NONE,
+            'Install'
+        );
+        $this->addOption(
+            'export',
+            'e',
+            InputOption::VALUE_NONE,
+            'Export'
+        );
+        $this->addOption(
+            'plugin',
+            'p',
+            InputOption::VALUE_NONE,
+            'Default'
         );
 
-        return $this->getHelper('question')->ask($input, $output, $question);
-    }
-
-    /**
-     * 执行删除操作
-     */
-    protected function performDeletion(Filesystem $filesystem, array $toDelete, string $targetDir, OutputInterface $output)
-    {
-        // 先删除文件
-        foreach ($toDelete['files'] as $file) {
-            try {
-                $filesystem->delete($targetDir . '/' . $file);
-                $output->writeln("<info>Deleted file: {$file}</info>");
-            } catch (\Exception $e) {
-                $output->writeln("<error>Failed to delete file {$file}: {$e->getMessage()}</error>");
-            }
-        }
-
-        // 再删除空目录
-        foreach ($toDelete['dirs'] as $dir) {
-            try {
-                $filesystem->deleteDir($targetDir . '/' . $dir);
-                $output->writeln("<info>Deleted directory: {$dir}</info>");
-            } catch (\Exception $e) {
-                $output->writeln("<error>Failed to delete directory {$dir}: {$e->getMessage()}</error>");
-            }
-        }
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $name = $input->getArgument('name');
+        $export = $input->getOption('export');
+        $install = $input->getOption('install');
+        $plugin=$input->getOption('plugin');
+        $dirs=[];
+        foreach (self::$configPath as $source=>$target) {
+            $dirs['config'] = [
+                $source.$name=>$target.$name
+            ];
+            foreach ($dirs['config'] as $source=> $target) {
+                if ($export){
+                    $this->sync($source,$target,$input,$output);
+                }
+                if ($install){
+                    $this->sync($target,$source,$input,$output);
+                }
+            }
+        }
+        if ($plugin){
+            foreach (self::$pluginPath as $source=>$target) {
+                $dirs['plugin'] = [
+                    $source.$name=>$target.$name
+                ];
+            }
+            foreach ($dirs['plugin'] as $source=> $target) {
+                if ($export){
+                    $this->sync($source,$target,$input,$output);
+                }
+                if ($install){
+                    $this->sync($target,$source,$input,$output);
+                }
+            }
+        }
+
+
+
+        return Command::SUCCESS;
+    }
+
+    protected function sync($source,$target,InputInterface $input, OutputInterface $output): int
+    {
         try {
             $filesystem = Filesystem::disk('dev');
-            $sourceDir = self::$source;
-            $targetDir = self::$target;
+            $sourceDir = $source;
+            $targetDir = $target;
 
             // 确保目标目录存在
             if (!$filesystem->has($targetDir)) {
@@ -246,7 +249,7 @@ class RocareerExport extends Command
                 $count = count($changes['unchanged']);
                 $output->writeln("\n<fg=gray>Unchanged files $count: </>");
                 foreach ($changes['unchanged'] as $file) {
-                    $output->writeln("  [=] {$file}");
+//                    $output->writeln("  [=] {$file}");
                 }
             }
 
@@ -300,7 +303,7 @@ class RocareerExport extends Command
                 $targetParentPath = $targetDir . '/' . dirname($path);
 
                 $filesystem->putFileAs($targetDir, $sourceFile, $path);
-                $output->writeln("<comment>Updated file: {$path}</comment>");
+                $output->writeln("\n<comment>Updated file: {$path}</comment>");
                 $progressBar->advance();
             }
 
@@ -339,4 +342,73 @@ class RocareerExport extends Command
             return Command::FAILURE;
         }
     }
+    /**
+     * 查找需要删除的文件和目录
+     */
+    protected function findFilesToDelete(array $sourceFiles, array $targetFiles, string $targetPath): array
+    {
+        $toDelete = ['files' => [], 'dirs' => []];
+
+        // 找出需要删除的文件
+        foreach ($targetFiles as $path => $info) {
+            if (!$info['is_dir'] && !isset($sourceFiles[$path])) {
+                $toDelete['files'][] = $path;
+            }
+        }
+
+        // 找出需要删除的目录（自底向上）
+        $dirsToCheck = array_filter($targetFiles, function ($f) {
+            return $f['is_dir'];
+        });
+        krsort($dirsToCheck); // 反向排序确保先处理子目录
+
+        foreach ($dirsToCheck as $path => $info) {
+            if (!isset($sourceFiles[$path])) {
+                $toDelete['dirs'][] = $path;
+            }
+        }
+
+        return $toDelete;
+    }
+
+    /**
+     * 确认删除操作
+     */
+    protected function confirmDeletion(InputInterface $input, OutputInterface $output): bool
+    {
+        $question = new ConfirmationQuestion(
+            '<question>Are you sure you want to delete these items? (y/n)</question> ',
+            false
+        );
+
+        return $this->getHelper('question')->ask($input, $output, $question);
+    }
+
+    /**
+     * 执行删除操作
+     */
+    protected function performDeletion(Filesystem $filesystem, array $toDelete, string $targetDir, OutputInterface $output)
+    {
+        // 先删除文件
+        foreach ($toDelete['files'] as $file) {
+            try {
+                $filesystem->delete($targetDir . '/' . $file);
+                $output->writeln("<info>Deleted file: {$file}</info>");
+            } catch (\Exception $e) {
+                $output->writeln("<error>Failed to delete file {$file}: {$e->getMessage()}</error>");
+            }
+        }
+
+        // 再删除空目录
+        foreach ($toDelete['dirs'] as $dir) {
+            try {
+                $filesystem->deleteDir($targetDir . '/' . $dir);
+                $output->writeln("<info>Deleted directory: {$dir}</info>");
+            } catch (\Exception $e) {
+                $output->writeln("<error>Failed to delete directory {$dir}: {$e->getMessage()}</error>");
+            }
+        }
+    }
+
+
 }
