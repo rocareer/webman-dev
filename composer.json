@@ -1,0 +1,13 @@
+{
+  "name": "rocareer/webman-dev",
+  "type": "library",
+  "license": "MIT",
+  "description": "Webman plugin rocareer/webman-dev",
+  "require": {
+  },
+  "autoload": {
+    "psr-4": {
+      "Rocareer\\WebmanDev\\": "src"
+    }
+  }
+}
