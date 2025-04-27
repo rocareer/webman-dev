@@ -13,7 +13,7 @@
   ],
   "require": {
     "php": ">=8.1",
-    "rocareer/webman-think-filesystem": "^1.0"
+    "rocareer/webman-filesystem": "^1.0"
   },
   "autoload": {
     "psr-4": {
