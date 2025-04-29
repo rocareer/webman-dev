@@ -7,5 +7,6 @@
  */
 
 return[
-   \Rocareer\WebmanDev\command\RocareerPlugin::class
+   \Rocareer\WebmanDev\command\DevStatus::class,
+   \Rocareer\WebmanDev\command\RocareerPlugin::class,
 ];
