@@ -6,7 +6,9 @@
  * Describe  command.php
  */
 
-return[
-   \Rocareer\WebmanDev\command\DevStatus::class,
-   \Rocareer\WebmanDev\command\RocareerPlugin::class,
+return [
+    \Rocareer\WebmanDev\command\DevStatus::class,
+    \Rocareer\WebmanDev\command\DevCover::class,
+    \Rocareer\WebmanDev\command\RocareerPlugin::class,
+
 ];
