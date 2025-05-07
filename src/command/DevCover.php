@@ -58,9 +58,60 @@ class DevCover extends Command
             'use ba\ClickCaptcha;'=>'use plugin\radmin\extend\ba\ClickCaptcha;',
             'use ba\Captcha;'=>'use plugin\radmin\extend\ba\Captcha;',
             'use plugin\radmin\app\common\facade\Token;'=>'',
-            '$this->auth->id'=>'$this->request->auth->id',
+            '$this->auth->id'=>'$this->request->member->id',
             '* @return void'=>'',
-            'Config::get('=>'radmin_config('
+            'Config::get('=>'radmin_config(',
+            'use think\facade\Config;'=>'',
+            'use ba\Tree;'=>'use plugin\radmin\extend\ba\Tree;',
+            'use app\admin\model\\'=>'use plugin\radmin\app\admin\model\\',
+            '$this->auth->isSuperAdmin()'=>"Member::hasRole('super')",
+            '$this->auth->getRuleIds()'=>'AdminHelper::getRuleIds()',
+            // "\$Member::hasRole('super')"=>"Member::hasRole('super')"
+            '$this->auth->getAllAuthGroups'=>'AdminHelper::getAllAuthGroups',
+            '$this->request->request('=>'$this->request->input(',
+            '     $this->select();'=>'return $this->select();',
+            // '                 return $this->select();'=>'            return $this->select();'
+            '$this->request->param('=>'$this->request->input(',
+            "\$this->request->input('ids/a', []);"=>"\$this->request->input('ids', []);",
+            '        parent::del();'=>'        return parent::del();',
+            'namespace app\admin\model;'=>'namespace plugin\radmin\app\admin\model;',
+            'use think\Model;'=>'use plugin\radmin\app\common\model\BaseModel;',
+            'extends Model'=>'extends BaseModel',
+            'namespace app\admin\library\\'=>'namespace plugin\radmin\app\admin\library\\',
+            // '\app\common\controller\\'=>'\plugin\radmin\app\common\controller\\',
+            'use plugin\radmin\plugin\radmin\app\common\controller'=>'use plugin\radmin\app\common\controller',
+            'use plugin\radmin\plugin\radmin\plugin\radmin\app\common\controller'=>'use plugin\radmin\app\common\controller',
+            'plugin\radmin\plugin\radmin\plugin\radmin\plugin\radmin\\'=>'plugin\radmin\\',
+            '$this->auth->getInfo()'=>'$this->request->auth->user',
+            'request()->param'=>'request()->input',
+            'namespace app\admin\validate;'=>'namespace plugin\radmin\app\admin\validate;',
+            " config('buildadmin"=>" radmin_config('buildadmin",
+            'radmin_radmin_config'=>'radmin_config',
+            '    parent::edit();'=>'    return parent::edit();',
+            'namespace app\common\controller;'=>'namespace plugin\radmin\app\common\controller;',
+            'use app\BaseController;'=>'use plugin\radmin\app\common\controller\BaseController;',
+            'use app\common\library\token\TokenExpirationException;'=>'',
+            'namespace app\common\library\\'=>'namespace plugin\radmin\app\common\library\\',
+            'use app\common\library\Token;'=>'',
+            'use app\common\library\Auth;'=>'use plugin\radmin\app\common\library\Auth;',
+            ' extends model'=>' extends BaseModel',
+            'use app\common\model\\'=>'use plugin\radmin\app\common\model\\',
+            '= config('=>'= radmin_config(',
+            "radmin_config('plugin.radmin."=>"radmin_config('",
+            'use ba\Exception;'=>'use Exception;',
+            'use ba\Filesystem;'=>'use plugin\radmin\extend\ba\Filesystem;',
+            'use app\common\library\\'=>'use plugin\radmin\app\common\library\\',
+            'use app\admin\library\\'=>'use plugin\radmin\app\admin\library\\',
+            "=> public/npm-"=>"=> plugin/radmin/public/npm-",
+            "=> 'plugin/radmin/plugin/radmin/public/npm-"=>"=> 'plugin/radmin/public/npm-",
+            "= radmin_config('think-orm"=>"= config('think-orm"
+
+
+
+
+
+
+
 
             // 添加更多搜索和替换内容
         ];

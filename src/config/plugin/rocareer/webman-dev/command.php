@@ -9,6 +9,7 @@
 return [
     \Rocareer\WebmanDev\command\DevStatus::class,
     \Rocareer\WebmanDev\command\DevCover::class,
+    \Rocareer\WebmanDev\command\DevCount::class,
     \Rocareer\WebmanDev\command\RocareerPlugin::class,
 
 ];

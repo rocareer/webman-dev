@@ -111,11 +111,15 @@ class RocareerPlugin extends Command
             }
         }
         if ($export){
+            // $this->sync('.env','vendor/rocareer/radmin/src/.env',$input,$output);
             $this->sync('web','vendor/rocareer/radmin/src/web',$input,$output);
+            $this->sync('config','vendor/rocareer/radmin/src/config',$input,$output);
             $this->sync('support','vendor/rocareer/radmin/src/support',$input,$output);
         }
         if ($install){
+            // $this->sync('vendor/rocareer/radmin/src/.env','.env',$input,$output);
             $this->sync('vendor/rocareer/radmin/src/web','web',$input,$output);
+            $this->sync('vendor/rocareer/radmin/src/config','config',$input,$output);
             $this->sync('vendor/rocareer/radmin/src/support','support',$input,$output);
         }
 
