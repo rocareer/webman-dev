@@ -42,7 +42,7 @@ class RocareerPlugin extends Command
         'config/plugin/rocareer/'=>'vendor/rocareer/radmin/src/config/plugin/rocareer/'
     ];
     protected static $pluginPath=[
-        'plugin/' => 'vendor/rocareer/radmin/src/plugin/',
+        'plugin/' => 'vendor/rocareer/radmin/plugin/',
     ];
 
     protected function configure()
@@ -112,15 +112,15 @@ class RocareerPlugin extends Command
         }
         if ($export){
             // $this->sync('.env','vendor/rocareer/radmin/src/.env',$input,$output);
-            $this->sync('web','vendor/rocareer/radmin/src/web',$input,$output);
-            $this->sync('config','vendor/rocareer/radmin/src/config',$input,$output);
-            $this->sync('support','vendor/rocareer/radmin/src/support',$input,$output);
+            $this->sync('web','vendor/rocareer/radmin/web',$input,$output);
+            $this->sync('config','vendor/rocareer/radmin/config',$input,$output);
+            $this->sync('support','vendor/rocareer/radmin/support',$input,$output);
         }
         if ($install){
             // $this->sync('vendor/rocareer/radmin/src/.env','.env',$input,$output);
-            $this->sync('vendor/rocareer/radmin/src/web','web',$input,$output);
-            $this->sync('vendor/rocareer/radmin/src/config','config',$input,$output);
-            $this->sync('vendor/rocareer/radmin/src/support','support',$input,$output);
+            $this->sync('vendor/rocareer/radmin/web','web',$input,$output);
+            $this->sync('vendor/rocareer/radmin/config','config',$input,$output);
+            $this->sync('vendor/rocareer/radmin/support','support',$input,$output);
         }
 
 
