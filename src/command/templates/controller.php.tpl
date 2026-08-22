@@ -2,7 +2,7 @@
 
 namespace app\admin\controller\{{NAME}};
 
-use app\admin\model\{{UC}};
+use app\admin\model\{{UC}} as {{UC}}Model;
 use app\common\controller\Backend;
 use support\Response;
 use Throwable;
@@ -19,14 +19,14 @@ class {{UC}} extends Backend
     /**
      * {{UC}} 模型对象
      * @var object
-     * @phpstan-var \app\admin\model\{{UC}}
+     * @phpstan-var \app\admin\model\{{UC}}Model
      */
     protected object $model;
 
     public function initialize(): void
     {
         parent::initialize();
-        $this->model = new {{UC}}();
+        $this->model = new {{UC}}Model();
     }
 
     /**
@@ -60,7 +60,7 @@ class {{UC}} extends Backend
             return $this->error('name 不能为空');
         }
         try {
-            $row = new {{UC}}();
+            $row = new {{UC}}Model();
             $this->fill($row, $data);
             $row->save();
         } catch (Throwable $e) {
@@ -118,7 +118,7 @@ class {{UC}} extends Backend
         return $this->success('');
     }
 
-    protected function fill({{UC}} $row, array $data): void
+    protected function fill({{UC}}Model $row, array $data): void
     {
         if (isset($data['name'])) {
             $row->name = trim((string) $data['name']);

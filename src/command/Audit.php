@@ -157,7 +157,7 @@ class Audit extends Command
                 if ($method === 'initialize' || !$info['sigs'][$method]) {
                     continue;
                 }
-                if (!str_contains($info['sigs'][$method], ': Response')) {
+                if (!str_contains($info['sigs'][$method], ': Response') && !str_contains($info['sigs'][$method], ': ?HttpResponse')) {
                     $issues[] = "$rel::$method missing : Response";
                 }
             }
@@ -354,9 +354,27 @@ class Audit extends Command
                 }
             }
             if ($t[0] === T_FUNCTION) {
+                // 仅统计 public 方法（protected/private 辅助方法无按钮节点）
+                $prev = null;
+                for ($k = $i - 1; $k >= 0; $k--) {
+                    $pk = $tokens[$k];
+                    if (is_array($pk) && in_array($pk[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) { continue; }
+                    $prev = $pk;
+                    break;
+                }
+                $vis = false;
+                $scan = 0;
+                for ($k = $i - 1; $k >= 0 && $scan < 8; $k--) {
+                    $pk = $tokens[$k];
+                    if (!is_array($pk)) { continue; }
+                    if (in_array($pk[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) { continue; }
+                    $scan++;
+                    if (in_array($pk[0], [T_PRIVATE, T_PROTECTED], true)) { $vis = true; break; }
+                }
+                if ($vis) { continue; }
                 $sig = '';
                 $name = '';
-                for ($j = $i + 1; $j < $n; $j++) {
+                for ($j = $i; $j < $n; $j++) {
                     $v = $tokens[$j];
                     if ($v === '{') {
                         break;
@@ -369,7 +387,7 @@ class Audit extends Command
                         break;
                     }
                 }
-                if (preg_match('~functions+(w+)~', $sig, $sm)) {
+                if (preg_match('~function\\s+(\w+)~', $sig, $sm)) {
                     $name = $sm[1];
                 }
                 if (!$name) {
@@ -389,7 +407,7 @@ class Audit extends Command
                         $depth--;
                         $full .= ')';
                         if ($depth === 0) {
-                            break;
+                            continue; // 继续收集返回类型（: Response）
                         }
                         continue;
                     }
