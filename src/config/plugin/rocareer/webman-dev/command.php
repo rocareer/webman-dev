@@ -11,5 +11,6 @@ return [
     \Rocareer\WebmanDev\command\DevCover::class,
     \Rocareer\WebmanDev\command\DevCount::class,
     \Rocareer\WebmanDev\command\RocareerPlugin::class,
-
+    \Rocareer\WebmanDev\command\Audit::class,
+    \Rocareer\WebmanDev\command\MakePlugin::class,
 ];
