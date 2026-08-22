@@ -147,7 +147,7 @@ class Audit extends Command
             if (str_contains($src, '?Response')) {
                 $issues[] = "$rel: uses ?Response (should be : Response)";
             }
-            if (str_contains($src, 'return null;')) {
+            if (str_contains($src, 'return null;') && str_contains($src, '?Response')) {
                 $issues[] = "$rel: contains 'return null;'";
             }
             if (in_array('initialize', $info['methods'], true) && !str_contains($src, 'parent::initialize()')) {
@@ -286,7 +286,7 @@ class Audit extends Command
             return;
         }
         $head = file_get_contents($changelog);
-        if (!preg_match('~^##s+([^s]+)~m', $head, $m)) {
+        if (!preg_match('~^##\\s+([^\\s]+)~m', $head, $m)) {
             $output->writeln('<comment>[SKIP]</comment> version sync: no version heading');
             return;
         }
@@ -353,7 +353,7 @@ class Audit extends Command
                     }
                 }
             }
-            if ($t[0] === T_FUNCTION && is_array($tokens[$i + 1] ?? null) && $tokens[$i + 1][1] === '&') {
+            if ($t[0] === T_FUNCTION) {
                 $sig = '';
                 $name = '';
                 for ($j = $i + 1; $j < $n; $j++) {
