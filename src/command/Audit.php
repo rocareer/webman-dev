@@ -14,12 +14,12 @@
  * 用法：php webman rocareer:audit [--root=工作区根] [--pkg=ai]
  */
 
-namespace RocareerWebmanDevcommand;
+namespace Rocareer\WebmanDev\command;
 
-use SymfonyComponentConsoleCommandCommand;
-use SymfonyComponentConsoleInputInputInterface;
-use SymfonyComponentConsoleInputInputOption;
-use SymfonyComponentConsoleOutputOutputInterface;
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputOption;
+use Symfony\Component\Console\Output\OutputInterface;
 
 class Audit extends Command
 {
@@ -93,7 +93,7 @@ class Audit extends Command
     protected function phpFiles(string $dir): array
     {
         $out = [];
-        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
+        $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
         foreach ($it as $file) {
             if ($file->isFile() && $file->getExtension() === 'php' && !str_contains($file->getPathname(), '/vendor/')) {
                 $out[] = $file->getPathname();
