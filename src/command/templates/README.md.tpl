@@ -4,14 +4,14 @@
 
 ## 安装
 
-1. demo/full/composer.json 的 repositories 增加 path 仓库并钉版：
+1. dev/full/composer.json 的 repositories 增加 path 仓库并钉版：
 
 json: { "type": "path", "url": "../../{{NAME}}", "options": { "versions": { "rocareer/{{NAME}}": "0.1.0" } } }
 
 2. require 增加 "rocareer/{{NAME}}": "^0.1"，然后：
 
 bash:
-cd demo/full
+cd dev/full
 composer update --no-dev
 php webman migrate:run   # 建表 + 菜单权限
 php start.php restart
