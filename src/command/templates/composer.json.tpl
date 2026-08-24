@@ -3,7 +3,7 @@
   "type": "library",
   "keywords": ["webman", "radmin", "{{NAME}}"],
   "homepage": "https://rocareer.com",
-  "license": "Apache-2.0",
+  "license": "proprietary",
   "description": "{{DESC}}",
   "authors": [
     {
