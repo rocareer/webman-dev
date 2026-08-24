@@ -104,8 +104,8 @@ class MakePlugin extends Command
         $io->writeln('Next steps:');
         $io->writeln('  1. cd ' . $out . ' && git init && git add -A && git commit -m "v0.1.0: 首个版本"');
         $io->writeln('  2. gitee 建仓 rocareer/' . $uc . ' 后 git remote add origin ... && git push -u origin master');
-        $io->writeln('  3. demo/full/composer.json 注册 path 仓库并钉版（见 README）');
-        $io->writeln('  4. cd demo/full && composer update --no-dev && php webman migrate:run && php start.php restart');
+        $io->writeln('  3. dev/full/composer.json 注册 path 仓库并钉版（见 README）');
+        $io->writeln('  4. cd dev/full && composer update --no-dev && php webman migrate:run && php start.php restart');
         return self::SUCCESS;
     }
 

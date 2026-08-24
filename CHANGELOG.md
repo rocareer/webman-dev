@@ -17,7 +17,7 @@
   缺失/错名/孤儿按钮全部报出（2026-08-30 深度审计发现 ai/channel/agent 等包连字符按钮对非超管 401，即此检查修复）
 - 迁移时间戳查重（Phinx 全局排序，撞号致全家桶 migrate 无法执行）
 - 残留扫描：CRUD 脚手架死代码（Test 控制器/模型/验证器）、TODO/FIXME 计数
-- 版本同步：CHANGELOG 头部版本 vs demo/full composer.json path 钉版
+- 版本同步：CHANGELOG 头部版本 vs dev/full composer.json path 钉版
 - 用法：php webman rocareer:audit [--root=工作区根] [--pkg=ai]
 
 ### 新增 rocareer:make-plugin 插件脚手架命令

@@ -9,7 +9,7 @@
  *      后末两段 / 连接) + '/' + strtolower(方法名)；按钮 name 必须精确相等，全小写无连字符）
  *   4. 迁移时间戳查重
  *   5. 残留扫描（Test 脚手架死代码、TODO/FIXME）
- *   6. 版本同步（CHANGELOG vs demo/full 钉版）
+ *   6. 版本同步（CHANGELOG vs dev/full 钉版）
  *
  * 用法：php webman rocareer:audit [--root=工作区根] [--pkg=ai]
  */
@@ -79,7 +79,7 @@ class Audit extends Command
         }
         $dir = getcwd() ?: '.';
         while (true) {
-            if (is_dir("$dir/radmin") && is_dir("$dir/demo")) {
+            if (is_dir("$dir/radmin") && is_dir("$dir/dev")) {
                 return $dir;
             }
             $parent = dirname($dir);
@@ -280,9 +280,9 @@ class Audit extends Command
     protected function auditVersion(string $root, string $pkg, OutputInterface $output): void
     {
         $changelog = "$root/$pkg/CHANGELOG.md";
-        $demoJson = "$root/demo/full/composer.json";
-        if (!is_file($changelog) || !is_file($demoJson)) {
-            $output->writeln('<comment>[SKIP]</comment> version sync: changelog/demo json missing');
+        $devJson = "$root/dev/full/composer.json";
+        if (!is_file($changelog) || !is_file($devJson)) {
+            $output->writeln('<comment>[SKIP]</comment> version sync: changelog/dev json missing');
             return;
         }
         $head = file_get_contents($changelog);
@@ -292,7 +292,7 @@ class Audit extends Command
         }
         $pkgVer = trim(str_replace(['[', ']', 'v', 'V'], '', $m[1]));
         $compkg = strtolower($pkg);
-        $json = json_decode(file_get_contents($demoJson), true);
+        $json = json_decode(file_get_contents($devJson), true);
         $pin = '';
         foreach (($json['repositories'] ?? []) as $repo) {
             if (($repo['type'] ?? '') === 'path') {
@@ -304,13 +304,13 @@ class Audit extends Command
             }
         }
         if (!$pin) {
-            $output->writeln('<comment>[SKIP]</comment> version sync: no demo pin for rocareer/' . $compkg);
+            $output->writeln('<comment>[SKIP]</comment> version sync: no dev pin for rocareer/' . $compkg);
             return;
         }
         $norm = fn($v) => strtolower(trim(str_replace(['v', 'V', '[', ']'], '', $v)));
         if ($norm($pkgVer) !== $norm($pin)) {
             $this->failCount++;
-            $output->writeln("<fg=red>[FAIL]</fg=red> version sync: changelog $pkgVer != demo pin $pin");
+            $output->writeln("<fg=red>[FAIL]</fg=red> version sync: changelog $pkgVer != dev pin $pin");
         } else {
             $output->writeln("<info>[PASS]</info> version sync ($pkgVer)");
         }

@@ -4,7 +4,7 @@ Radmin 全家桶开发工具包：代码规范审计 + 插件脚手架。
 
 ## 安装
 
-demo/full/composer.json 注册 path 仓库并钉版（versions: rocareer/webman-dev = 3.0.0），
+dev/full/composer.json 注册 path 仓库并钉版（versions: rocareer/webman-dev = 3.0.0），
 然后 composer update --no-dev。
 
 ## 命令
@@ -21,6 +21,6 @@ demo/full/composer.json 注册 path 仓库并钉版（versions: rocareer/webman-
 
 ### rocareer:make-plugin — 插件脚手架
 
-    php webman rocareer:make-plugin demo --title=演示 --description="..." [--out=/tmp/demo]
+    php webman rocareer:make-plugin dev --title=演示 --description="..." [--out=/tmp/dev]
 
-生成标准插件骨架后按提示接入 demo 即可。
+生成标准插件骨架后按提示接入 dev 即可。
