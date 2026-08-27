@@ -12,11 +12,13 @@
     }
   ],
   "require": {
-    "php": ">=8.1"
+    "php": ">=8.1",
+    "rocareer/radmin": "^3.1"
   },
   "autoload": {
     "psr-4": {
-      "Rocareer\\WebmanDev\\": "src"
+      "Rocareer\\WebmanDev\\": "src",
+      "app\\": "src/app"
     }
   },
 

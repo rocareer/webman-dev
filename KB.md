@@ -4,7 +4,7 @@
 
 ## 是什么
 
-rocareer/webman-dev 是 Rocareer 工作区的开发工具链插件，服务于 rocareer 全家桶（radmin、ai、memory、chat、agent 等 webman 基础设施包）的日常维护与质量保障。它提供两条命令行工具：**rocareer:audit** 做代码规范审计，**rocareer:make-plugin** 一键生成符合全家桶规范的插件骨架。它不提供后台菜单，而是命令行里的「工程质量守门员」加「新包生成器」。
+rocareer/webman-dev 是 Rocareer 工作区的开发工具链插件，服务于 rocareer 全家桶（radmin、ai、memory、chat、agent 等 webman 基础设施包）的日常维护与质量保障。它提供两条命令行工具（**rocareer:audit** 代码规范审计、**rocareer:make-plugin** 插件骨架生成），并自带**「工程质量审计」后台管理页**（开发运维菜单）：在浏览器里管理审计规则与项目、一键运行审计、按项目查看问题数量与明细——CLI 与后台页面共用同一套审计引擎。
 
 ## 用途与意义
 
@@ -12,9 +12,11 @@ rocareer/webman-dev 是 Rocareer 工作区的开发工具链插件，服务于 r
 
 ## 主要功能
 
+- **工程质量审计（后台管理页）**：「开发运维 → 审计项目/审计规则/审计结果」——项目管理与一键运行审计（全部或单个项目）、规则启停、最近一轮每个项目的问题总数与未通过规则、结果明细与问题详情查看，并支持按审计轮次/项目/规则/结果筛选；审计落地到结果表，可追溯每次审计。
 - **rocareer:audit**：对基础设施包做六类检查——PHP 语法、控制器规范（继承 Backend、返回类型、初始化调父类）、权限按钮名与接口路由精确匹配、初始化脚本时间戳查重、脚手架死代码与 TODO/FIXME 扫描、版本号同步；任一 FAIL 退出码非 0，可接入 CI。
 - **rocareer:make-plugin**：一键生成标准插件骨架，含插件配置、初始化脚本、后台控制器/模型/服务层示例、建表与菜单权限按钮，按提示接入演示工程即可运行。
-- **定向审计**：支持只审单个包、指定工作区根，默认自动探测。
+- **MCP 工程质量审计工具**：系统装了 MCP 插件后，自动向外部 AI 客户端（如 DSH、Claude Desktop）注册 quality_audit 工具——它们可以直接对基础设施包发起一次工程质量审计（同一套六类规则引擎），适合在对话里快速自检。
+- **定向审计**：支持只审单个包、指定源码根，默认自动探测。
 
 ## 关键概念
 
@@ -25,8 +27,6 @@ rocareer/webman-dev 是 Rocareer 工作区的开发工具链插件，服务于 r
 
 ## 使用入口
 
-作为 webman 命令行插件，在宿主项目的 webman 环境下执行：
-
-- **audit**：`php webman rocareer:audit` 审计全部包；`--pkg=ai` 只审单个包；`--root=/path` 指定工作区根。
-- **make-plugin**：`php webman rocareer:make-plugin <name> --title=中文名 [--description=...] [--out=路径]` 生成骨架，随后按提示接入演示工程。
-- 两者均在 CLI 调用、无后台菜单，可用于交付/收口前自检与 CI 门禁。
+- **后台管理页**：登录后台 →「开发和调试」→「审计项目」「审计规则」「审计结果」。先确认项目管理里的包列表，点「运行全部审计」（或单项目行的运行按钮）即可；结果按轮次留存，问题明细可点开查看。
+- **CLI**：在宿主项目 webman 环境下执行——`php webman rocareer:audit` 审计全部包；`--pkg=ai` 只审单个包；`--root=/path` 指定源码根。**make-plugin**：`php webman rocareer:make-plugin <name> --title=中文名 [--description=...] [--out=路径]` 生成骨架，随后按提示接入演示工程。
+- 两者可互为补充：CLI 适合作交付/收口自检与 CI 门禁，后台页面适合日常查看与管理。
