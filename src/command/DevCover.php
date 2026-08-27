@@ -7,6 +7,13 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Output\OutputInterface;
 
+/**
+ * dev:cover 命令——指定目录批量查找替换工具（代码风格迁移）。
+ *
+ * 在 radmin 根目录（radmin_base()）下按配置的 contents 映射批量执行 str_replace，
+ * 用于把旧版代码风格迁移为当前 radmin 插件风格（如 think\facade\Db → support\think\Db、
+ * app\admin\model → plugin\radmin\... 等），并输出每个文件/目录的替换结果。
+ */
 class DevCover extends Command
 {
     protected static $defaultName = 'dev:cover';

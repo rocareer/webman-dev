@@ -27,18 +27,18 @@ use RecursiveIteratorIterator;
 use Symfony\Component\Console\Question\ConfirmationQuestion;
 use think\File;
 
+/**
+ * rocareer:plugin 命令——Radmin 插件目录同步工具。
+ *
+ * 把 radmin 插件配置/资源（config、web、support 等目录）在工作区与
+ * vendor/rocareer/radmin 之间双向同步（--export：工作区 -> vendor；--install：
+ * vendor -> 工作区），对比 md5 输出新增/修改/未变化文件报告，删除操作需确认。
+ */
 class RocareerPlugin extends Command
 {
     protected static $defaultName = 'rocareer:plugin';
-    protected static $defaultDescription = 'Synchronize test1 and test directories using Filesystem';
-
-
-
-    protected $dirs = [
-
-
-    ];
-    protected static $configPath=[
+    protected static $defaultDescription = '同步 Radmin 插件目录到工作区';
+    protected static $configPath = [
         'config/plugin/rocareer/'=>'vendor/rocareer/radmin/src/config/plugin/rocareer/'
     ];
     protected static $pluginPath=[
@@ -274,9 +274,6 @@ class RocareerPlugin extends Command
             if (!empty($changes['unchanged'])) {
                 $count = count($changes['unchanged']);
                 $output->writeln("\n<fg=gray>Unchanged files $count: </>");
-                foreach ($changes['unchanged'] as $file) {
-//                    $output->writeln("  [=] {$file}");
-                }
             }
 
             $output->writeln("\n<info>Note: No files will be deleted from target directory.</info>");
@@ -413,7 +410,7 @@ class RocareerPlugin extends Command
     /**
      * 执行删除操作
      */
-    protected function performDeletion(Filesystem $filesystem, array $toDelete, string $targetDir, OutputInterface $output)
+    protected function performDeletion(Filesystem $filesystem, array $toDelete, string $targetDir, OutputInterface $output): void
     {
         // 先删除文件
         foreach ($toDelete['files'] as $file) {

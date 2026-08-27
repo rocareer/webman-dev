@@ -9,6 +9,12 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use support\Log;
 
+/**
+ * dev:status 命令——输出当前 PHP 环境状态（开发排查）。
+ *
+ * 展示 PHP 版本、内存占用、执行时间与已加载类/函数统计；-h <关键词> 模糊搜索已加载
+ * 类/函数，-f 输出全部已加载类/函数与 PHP 配置；输出同时写入 runtime/logs/R-dev.log。
+ */
 class DevStatus extends Command
 {
     protected static $defaultName = 'dev:status';

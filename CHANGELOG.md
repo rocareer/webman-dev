@@ -1,5 +1,20 @@
 # Changelog
 
+## [v3.3.1] - 2026-09-01
+
+### 代码清理与修复
+
+- **DevCount 清理调试残留**：删除 `print_r(get_declared_classes())` 调试输出、注释掉的调试行与空 docblock，
+  "Hello dev count" 文案改为中文、tab 缩进统一为 4 空格、等号两侧补空格，类头补中文注释
+  （命令定位：统计/查看已加载类、函数与内存等开发信息，与 dev:status 定位互补，保留原命令）。
+- **删除空壳死代码**：`src/Sync.php`（run() 空实现、未注册、无任何引用）整文件删除。
+- **RocareerPlugin 残留清理**：defaultDescription 改为正确中文描述（同步 Radmin 插件目录到工作区）、
+  删除空 `$dirs` 属性、`$configPath` 声明补空格、删除注释掉的调试输出行、
+  `performDeletion()` 补 `: void` 返回类型，类头补中文注释。
+- **Install 重写为 mcp 同款风格**：`$parent_dir` 改 camelCase（`$parentDir`）、英文模板注释改中文、
+  install/uninstall/installByRelation/uninstallByRelation 补 `: void`、方法用途补中文注释。
+- 无类注释的 5 个类（DevCount/DevCover/DevStatus/RocareerPlugin/Install）补中文类注释。
+
 ## v3.3.0 - 2026-08-28
 
 ### 新增 5 条工程质量审计规则（异步铁律 + 代码质量，2026-08-28 全量审计实战沉淀）
