@@ -14,7 +14,7 @@ use app\mcp\support\McpToolCollectionInterface;
  *
  * 提供 1 个工具 quality_audit（复用后台/CLI 同一审计引擎 AuditService）：
  *   - PHP 语法（php -l 批量子进程，fiber 非阻塞）、控制器规范、权限节点匹配、
- *     迁移时间戳查重、残留扫描、版本同步 六类规则；
+ *     迁移时间戳查重、残留扫描、版本同步、前端页面规范 七类规则；
  *   - 重量级操作（秒级），低频使用；detail=true 返回问题明细，否则仅摘要。
  *
  * 子端点：/mcp/dev（只服务本集合工具，scope 隔离）。

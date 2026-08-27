@@ -25,6 +25,7 @@ class AuditService
         'migration' => ['title' => '迁移时间戳查重', 'description' => 'Phinx 迁移文件时间戳冲突（撞号会阻断全家桶 migrate:run）'],
         'residue' => ['title' => '残留扫描', 'description' => 'CRUD 脚手架死代码（Test 控制器/模型/验证器）+ TODO/FIXME 计数'],
         'version' => ['title' => '版本同步', 'description' => 'CHANGELOG 头部版本 vs dev/full composer.json path 钉版'],
+        'web_page' => ['title' => '前端页面规范', 'description' => 'Vue 页面模板一致性：禁止自创依赖注入/裸 axios//src/ 导入、baTable 体系页面必须经 baTable、弹窗提交走 onSubmit（radmin 同步树跳过）'],
     ];
 
     /** 问题明细入库/返回上限（完整数量在 count） */
@@ -116,6 +117,7 @@ class AuditService
             'migration' => 'migrations: none',
             'residue' => 'no src dir',
             'version' => 'version sync: changelog/dev json missing',
+            'web_page' => 'web pages: none',
         ];
         $packages = [];
         foreach ($pkgs as $name) {
@@ -417,6 +419,81 @@ class AuditService
             return ['issues' => ["changelog $pkgVer != dev pin $pin"], 'note' => $pkgVer];
         }
         return ['issues' => [], 'note' => $pkgVer];
+    }
+
+    /* ---------- 7. 前端页面规范（非标手写 Vue 页面审计） ---------- */
+
+    /**
+     * 前端页面规范检查（静态扫描 <pkg>/web/src/views/backend 下的 Vue 页面）
+     *
+     * 依据工作区「模板优先、禁止从零手写」前端硬性规范（五项，全部低误报）：
+     *   1. 禁止自创依赖注入（本 fork 仅 baTable 有 provide；inject('config') 曾致弹窗渲染崩溃）
+     *   2. 禁止裸 import axios（必须 /@/utils/axios 的 createAxios 统一封装）
+     *   3. 引用 baTable 体系组件（TableHeader/Table/PopupForm）必须初始化 baTable（禁止自建表格绕过 baTable）
+     *   4. 编辑弹窗必须走 baTable.onSubmit 提交（禁止绕过 baTable 手写请求）
+     *   5. 禁止 /src/ 根路径导入（应使用 /@/ 别名）
+     * 说明：radmin 包的 web 树是各包/业务工程页面的同步汇聚区（真源在各包 web/），跳过避免归属错乱。
+     * 表单字段与后端入参一致性暂为人工复核项（静态无法区分标准 CRUD 弹窗与特殊/透传弹窗，易误报）。
+     */
+    protected function checkWebPage(string $root, string $pkg, string $dir): ?array
+    {
+        if ($pkg === 'radmin') {
+            return null;
+        }
+        $webDir = "$dir/web/src/views/backend";
+        if (!is_dir($webDir)) {
+            return null;
+        }
+        $issues = [];
+        $vueFiles = $this->vueFiles($webDir);
+        foreach ($vueFiles as $file) {
+            $rel = str_replace($root . '/', '', $file);
+            $src = file_get_contents($file);
+            // 1) 自创依赖注入
+            if (preg_match_all("~inject\(\s*['\"]([^'\"]+)['\"]\s*\)~", $src, $m)) {
+                foreach ($m[1] as $key) {
+                    if ($key !== 'baTable') {
+                        $issues[] = "$rel: 自创依赖注入 inject('$key')（本 fork 无 provide，模板仅允许 inject('baTable')）";
+                    }
+                }
+            }
+            // 2) 裸 axios
+            if (preg_match("~import\s+axios\s+from\s*['\"]axios['\"]~", $src)) {
+                $issues[] = "$rel: 直接 import axios（应使用 /@/utils/axios 的 createAxios 统一封装）";
+            }
+            // 3) baTable 体系页面必须初始化 baTable（精确匹配导入，避免 onTableHeaderAction 等子串误报）
+            $usesUi = (bool) preg_match("~from\s*['\"]\/@\/components\/table~", $src)
+                || str_contains($src, "import PopupForm from './popupForm");
+            $usesBt = str_contains($src, 'new baTableClass') || str_contains($src, 'baTableApi(');
+            if ($usesUi && !$usesBt) {
+                $issues[] = "$rel: 使用 baTable 体系组件（TableHeader/Table/PopupForm）但未初始化 baTable（自建表格不经过 baTable）";
+            }
+            // 4) 弹窗提交必须走 baTable.onSubmit
+            if (str_ends_with($file, 'popupForm.vue')) {
+                $hasForm = str_contains($src, 'el-form') || str_contains($src, 'baTable.form');
+                if ($hasForm && !str_contains($src, 'baTable.onSubmit')) {
+                    $issues[] = "$rel: 编辑弹窗未使用 baTable.onSubmit 提交（禁止绕过 baTable 手写请求）";
+                }
+            }
+            // 5) /src/ 根路径导入
+            if (preg_match("~from\s*['\"]\/src\/~", $src)) {
+                $issues[] = "$rel: 使用 /src/ 根路径导入（应使用 /@/ 别名）";
+            }
+        }
+        return ['issues' => $issues, 'note' => count($vueFiles) . ' vue files'];
+    }
+
+    /** 全部 Vue 文件（web/src/views/backend 递归） */
+    protected function vueFiles(string $dir): array
+    {
+        $out = [];
+        $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
+        foreach ($it as $file) {
+            if ($file->isFile() && $file->getExtension() === 'vue') {
+                $out[] = $file->getPathname();
+            }
+        }
+        return $out;
     }
 
     /* ---------- 解析工具（token_get_all，无正则转义） ---------- */

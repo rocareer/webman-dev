@@ -17,7 +17,9 @@ dev/full/composer.json 注册 path 仓库并钉版（versions: rocareer/webman-d
     php webman rocareer:audit --root=/path/to/src
 
 检查项：php -l、控制器规范（Backend / : Response / initialize / 注释）、
-权限按钮 name 与 routePath 匹配、迁移时间戳查重、脚手架残留、版本钉版同步。
+权限按钮 name 与 routePath 匹配、迁移时间戳查重、脚手架残留、版本钉版同步、
+前端页面规范（web_page：Vue 页面模板一致性——禁止自创依赖注入/裸 axios//src/ 导入、
+baTable 体系页面必须经 baTable、弹窗提交走 onSubmit；radmin 同步树跳过）。
 任一 FAIL 时 exit code 非 0，可用于 CI。规则实现在 `app\admin\service\AuditService`，
 与后台管理页共用同一引擎；`--root` 接受含 radmin 的 src 根或工作区根（内部落到 src）。
 

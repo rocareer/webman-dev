@@ -108,6 +108,7 @@ class Audit extends Command
             'migration' => 'migrations timestamps',
             'residue' => 'residue',
             'version' => 'version sync',
+            'web_page' => 'web pages',
         ][$code] ?? $code;
     }
 

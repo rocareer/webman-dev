@@ -7,6 +7,21 @@
 - 许可证由开源协议改为 proprietary（商业/内部专有），不适用任何开源许可证；LICENSE 文件同步替换为 Rocareer 专有许可文本。
 - 版权声明统一为：Copyright (c) Rocareer Team. All rights reserved.；作者：albert@rocareer.com。
 
+## v3.2.0 - 2026-08-27
+
+### 新增「前端页面规范」审计规则（web_page，feat）
+
+- 补齐前端盲区：此前六类规则全部面向 PHP 后端，AGENTS「模板优先、禁止从零手写」「只准用 baTable 约定」的前端硬性规范无机器审计；v3.2.0 新增 **web_page** 规则静态扫描各包 `web/src/views/backend` 的 Vue 页面，五项低误报检查：
+  1. 禁止自创依赖注入 `inject('xxx')`（本 fork 仅 `baTable` 有 provide；`inject('config')` 曾致弹窗渲染崩溃）
+  2. 禁止裸 `import axios from 'axios'`（必须 `/@/utils/axios` 的 createAxios 统一封装）
+  3. 引用 baTable 体系组件（TableHeader/Table/PopupForm）必须初始化 baTable（禁止自建表格绕过 baTable；精确匹配导入，规避 `onTableHeaderAction` 子串误报）
+  4. 编辑弹窗必须走 `baTable.onSubmit` 提交（禁止绕过 baTable 手写请求）
+  5. 禁止 `/src/` 根路径导入（应使用 `/@/` 别名）
+- radmin 包的 web 树是各包/业务工程页面的同步汇聚区（真源在各包 web/），该规则对 radmin 跳过，避免归属错乱。
+- 实测（全量审计）：各包 web_page 全部 PASS（当前仓库无前端硬性违规，规则作为防回潮门禁）。
+- 说明：弹窗表单字段与后端入参一致性暂为人工复核项（静态无法区分标准 CRUD 弹窗与特殊/透传弹窗，易误报，故不纳入自动化）。
+- 迁移 `20261028130000_radmin_webman_dev_audit_web_page_rule`（幂等）为规则表补种子行，后台「审计规则」页自动出现，需 `migrate:run`。
+
 ## v3.1.1 - 2026-08-27
 
 ### 审计规则精简与修复（拒绝过度设计，fix）
