@@ -15,6 +15,12 @@ class DevAuditProject extends BaseModel
 {
     protected $name = 'radmin_dev_audit_project';
 
+    /**
+     * 关闭时间字段自动格式化（think-orm v4 会把 create_time/update_time 的 int 值
+     * 自动转成 'Y-m-d H:i:s' 字符串再参与 (int) 强转出错——本包时间列一律 int 时间戳）
+     */
+    protected $dateFormat = false;
+
     public const STATUS_ENABLED = 'enabled';
     public const STATUS_DISABLED = 'disabled';
 

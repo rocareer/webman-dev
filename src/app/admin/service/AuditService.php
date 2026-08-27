@@ -237,7 +237,7 @@ class AuditService
 
     /* ---------- 2. 控制器规范 ---------- */
 
-    protected function checkController(string $root, string $pkg, string $dir): array
+    protected function checkController(string $root, string $pkg, string $dir): ?array
     {
         $ctrlDir = "$dir/src/app/admin/controller";
         if (!is_dir($ctrlDir)) {
@@ -279,7 +279,7 @@ class AuditService
 
     /* ---------- 3. 权限节点匹配 ---------- */
 
-    protected function checkPermission(string $root, string $pkg, string $dir): array
+    protected function checkPermission(string $root, string $pkg, string $dir): ?array
     {
         $ctrlDir = "$dir/src/app/admin/controller";
         $migDir = "$dir/database/migrations";
@@ -324,7 +324,7 @@ class AuditService
 
     /* ---------- 4. 迁移时间戳查重 ---------- */
 
-    protected function checkMigration(string $root, string $pkg, string $dir): array
+    protected function checkMigration(string $root, string $pkg, string $dir): ?array
     {
         $migDir = "$dir/database/migrations";
         if (!is_dir($migDir)) {
@@ -345,7 +345,7 @@ class AuditService
 
     /* ---------- 5. 残留扫描 ---------- */
 
-    protected function checkResidue(string $root, string $pkg, string $dir): array
+    protected function checkResidue(string $root, string $pkg, string $dir): ?array
     {
         if (!is_dir("$dir/src")) {
             return null;
@@ -368,7 +368,7 @@ class AuditService
 
     /* ---------- 6. 版本同步 ---------- */
 
-    protected function checkVersion(string $root, string $pkg, string $dir): array
+    protected function checkVersion(string $root, string $pkg, string $dir): ?array
     {
         $changelog = "$dir/CHANGELOG.md";
         $devJson = '';
@@ -382,10 +382,21 @@ class AuditService
             return null;
         }
         $head = file_get_contents($changelog);
-        if (!preg_match('~^##\s+([^\s]+)~m', $head, $m)) {
+        // 取首个「已发布」版本小节（跳过 未发布/Unreleased，避免把未发布段当版本号误报）
+        if (!preg_match_all('~^##\s+([^\s]+)~m', $head, $mm)) {
             return null;
         }
-        $pkgVer = trim(str_replace(['[', ']', 'v', 'V'], '', $m[1]));
+        $pkgVer = '';
+        foreach ($mm[1] as $heading) {
+            if (preg_match('~未发布|Unreleased~', $heading)) {
+                continue;
+            }
+            $pkgVer = trim(str_replace(['[', ']', 'v', 'V'], '', $heading));
+            break;
+        }
+        if ($pkgVer === '') {
+            return null;
+        }
         $compkg = strtolower($pkg);
         $json = json_decode(file_get_contents($devJson), true);
         $pin = '';
@@ -405,7 +416,7 @@ class AuditService
         if ($norm($pkgVer) !== $norm($pin)) {
             return ['issues' => ["changelog $pkgVer != dev pin $pin"], 'note' => $pkgVer];
         }
-        return ['issues' => [], 'note' => "($pkgVer)"];
+        return ['issues' => [], 'note' => $pkgVer];
     }
 
     /* ---------- 解析工具（token_get_all，无正则转义） ---------- */

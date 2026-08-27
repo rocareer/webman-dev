@@ -43,6 +43,16 @@
 - **修复 rootPath 自动探测**：dev/full 宿主（workspace/dev/<host>）此前按 dirname(base_path)+/src 探测成
   workspace/dev/src（不存在）导致探测失败，现加入「上上级/src」候选（workspace/src）并保留旧候选兼容。
 
+### 后台页落地验证修复（fix）
+
+- **模型时间戳**：DevAuditRule/DevAuditProject/DevAuditResult 增加 `$dateFormat = false`（think-orm v4 会把
+  int 时间戳自动格式化成 'Y-m-d H:i:s' 字符串，导致列表时间列显示错乱；与 agent 包同款约定）。
+- **run 按项目筛选**：`ids` 参数显式归一化（数组/逗号串均可）——webman `post()` 不支持 `/a` 修饰符，
+  此前按 ids 运行审计实际会跑全部项目。
+- **check 返回类型**：六个 check 方法返回类型由 `array` 放宽为 `?array`（跳过场景返回 null），
+  否则运行审计在规则跳过时直接抛「Return value must be of type array」。
+- **版本同步规则**：取首个「已发布」版本小节（跳过 `未发布/Unreleased` 段），避免把未发布段当版本号误报。
+
 ## v3.0.0 - 2026-08-30
 
 ### 新增 rocareer:audit 代码规范审计命令

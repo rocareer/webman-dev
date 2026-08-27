@@ -162,10 +162,14 @@ class AuditProject extends Backend
      */
     public function run(): Response
     {
-        $ids = $this->request->post('ids/a', []);
+        // ids 兼容数组/逗号分隔串（webman post 不支持 /a 修饰符，这里显式归一化）
+        $raw = $this->request->post('ids');
+        if (is_string($raw)) {
+            $raw = $raw === '' ? [] : explode(',', $raw);
+        }
+        $ids = is_array($raw) ? array_values(array_filter(array_map('intval', $raw))) : [];
         $query = DevAuditProject::where('status', DevAuditProject::STATUS_ENABLED);
-        if (is_array($ids) && !empty($ids)) {
-            $ids = array_map('intval', $ids);
+        if (!empty($ids)) {
             $query = $query->where('id', 'in', $ids);
         }
         $projects = $query->select();
