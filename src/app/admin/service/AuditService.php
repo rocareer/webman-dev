@@ -26,10 +26,10 @@ class AuditService
         'residue' => ['title' => '残留扫描', 'description' => 'CRUD 脚手架死代码（Test 控制器/模型/验证器）+ TODO/FIXME 计数'],
         'version' => ['title' => '版本同步', 'description' => 'CHANGELOG 头部版本 vs dev/full composer.json path 钉版'],
         'web_page' => ['title' => '前端页面规范', 'description' => 'Vue 页面模板一致性：禁止自创依赖注入/裸 axios//src/ 导入、baTable 体系页面必须经 baTable、弹窗提交走 onSubmit（radmin 同步树跳过）'],
-        'async_blocking' => ['title' => '异步阻塞扫描', 'description' => '异步铁律：常驻进程代码（src/app，排除 CLI command/）内禁止 BRPOP 长拉、同步 Guzzle HTTP、同步 SMTP、curl_exec、usleep/sleep 阻塞事件循环'],
-        'fqcn_dup' => ['title' => '同名类冲突', 'description' => '全工作区 namespace+class 对去重：同一 FQCN 被多文件定义（含 PSR-4 加载不到的死副本）即报'],
-        'superglobal' => ['title' => '超全局直读', 'description' => 'webman worker 内直读 $_COOKIE/$_SERVER 不可靠（不自动填充/命名不可配），应走 support\\Context + Request（CLI 场景除外，命中需人工确认）'],
-        'dead_code' => ['title' => '死类检测', 'description' => '全工作区零引用（无 new/静态调用/::class/配置字符串引用）的非框架类 = 死代码候选'],
+        'async_blocking' => ['title' => '异步阻塞扫描', 'description' => '异步铁律：常驻进程代码（src/app，排除 CLI command/）内禁止 BRPOP 长拉、同步 Guzzle HTTP、同步 SMTP、curl_exec、usleep/sleep 阻塞事件循环；文件显式声明协程回退（Coroutine::isCoroutine / inCoroutine / Fiber::getCurrent）或标注 @audit-ignore async_blocking 即视为已实现 CLI 回退，跳过'],
+        'fqcn_dup' => ['title' => '同名类冲突', 'description' => '全工作区 namespace+class 对去重：同一 FQCN 被多文件定义（含 PSR-4 加载不到的死副本）即报；文件标注 @audit-ignore fqcn_dup 视为有意的真源同步副本'],
+        'superglobal' => ['title' => '超全局直读', 'description' => 'webman worker 内直读 $_COOKIE/$_SERVER 不可靠（不自动填充/命名不可配），应走 support\\Context + Request；文件标注 @audit-ignore superglobal 视为已声明 CLI/回退路径人工确认'],
+        'dead_code' => ['title' => '死类检测', 'description' => '全工作区零引用（无 new/静态调用/::class/配置字符串/use 导入引用）的非框架类 = 死代码候选；SDK 包（无 src/app/admin，公共 API 供外部消费）与标注 @audit-ignore dead_code 的文件跳过'],
         'cross_copy' => ['title' => '跨包文件重复', 'description' => '不同包内容逐字节相同的 .php 文件 = 复制粘贴实现（应下沉共享，防接口漂移）'],
     ];
 
@@ -371,6 +371,9 @@ class AuditService
         }
         $todo = 0;
         foreach ($this->phpFiles("$dir/src") as $f) {
+            if (basename($f) === 'AuditService.php') {
+                continue; // 审计引擎自身含探测器模式字面量（TODO|FIXME|HACK 正则），自扫必误报
+            }
             $todo += preg_match_all('~(TODO|FIXME|HACK)~', file_get_contents($f));
         }
         if ($todo > 0) {
@@ -531,8 +534,18 @@ class AuditService
             if ($base === 'Install.php' || $base === 'Fiber.php') {
                 continue; // Install 钩子；Fiber.php 为 Fiber::sleep 封装实现（usleep 合法）
             }
+            if ($base === 'AuditService.php') {
+                continue; // 审计引擎自身源文件：含各探测模式字面量（brpop/curl_exec 等），自扫必误报
+            }
             if (str_contains($rel, '/command/')) {
                 continue;
+            }
+            $src = file_get_contents($file);
+            if (str_contains($src, '@audit-ignore async_blocking')) {
+                continue; // 显式豁免标注（如队列消费者内同步 SMTP：web 请求已投递 redis-queue，见 OidcMailerService）
+            }
+            if (preg_match('~(?:Coroutine::isCoroutine\(\)|Fiber::getCurrent\(\)|function\s+inCoroutine)~', $src)) {
+                continue; // 文件显式声明协程回退（CLI 才用同步实现）——混合模式，符合异步铁律
             }
             $lines = file($file) ?: [];
             $usesGuzzle = false;
@@ -548,8 +561,8 @@ class AuditService
                 if ($t === '' || str_starts_with($t, '//') || str_starts_with($t, '*') || str_starts_with($t, '/*')) {
                     continue;
                 }
-                // 阻塞休眠（Fiber/Timer 封装安全；self::/static:: 为封装类内部定义）
-                if (preg_match('~\b(?:usleep|sleep)\s*\(~', $line) && !preg_match('~(?:Fiber|Timer)::sleep|function\s+(?:usleep|sleep)~', $line)) {
+                // 阻塞休眠（排除 $var()/->/:: 方法形式与 function 声明；Fiber/Timer 封装安全）
+                if (preg_match('~(?<![\w$:>-])(?:usleep|sleep)\s*\(~', $line) && !preg_match('~function\s+(?:usleep|sleep)~', $line)) {
                     $issues[] = "$rel:$ln: 阻塞休眠 usleep/sleep（应使用 Fiber::sleep / Timer::sleep 挂起协程）";
                 }
                 if (str_contains($line, '->brpop(')) {
@@ -578,6 +591,8 @@ class AuditService
         }
         $issues = [];
         foreach ($this->rootClasses($root) as $fqcn => $locations) {
+            // 文件标注 @audit-ignore fqcn_dup = 有意的真源同步副本（如 webman-status-code 与 radmin 同名 StatusCode）
+            $locations = array_values(array_filter($locations, fn($loc) => !str_contains((string) @file_get_contents($root . '/' . $loc['rel']), '@audit-ignore fqcn_dup')));
             if (count($locations) < 2) {
                 continue;
             }
@@ -610,9 +625,17 @@ class AuditService
             if (basename($file) === 'Install.php' || str_contains($rel, '/command/')) {
                 continue;
             }
-            foreach (file($file) ?: [] as $i => $line) {
-                if (preg_match('~\$_(?:COOKIE|SERVER)\s*\[~', $line)) {
-                    $issues[] = "$rel:" . ($i + 1) . ': 直读超全局（webman worker 不自动填充，应走 support\\Context + Request；CLI 场景人工确认）';
+            $src = file_get_contents($file);
+            if (str_contains($src, '@audit-ignore superglobal')) {
+                continue; // 显式豁免标注（如 CLI/非 webman 上下文的 $_COOKIE 回退，Web 请求已优先走 Request）
+            }
+            if (preg_match_all('~\$_(?:COOKIE|SERVER)\s*\[~', $src, $mm, PREG_OFFSET_CAPTURE)) {
+                $lines = [];
+                foreach ($mm[0] as $hit) {
+                    $lines[] = substr_count(substr($src, 0, (int) $hit[1]), "\n") + 1;
+                }
+                foreach (array_unique($lines) as $ln) {
+                    $issues[] = "$rel:$ln: 直读超全局（webman worker 不自动填充，应走 support\\Context + Request；CLI 场景人工确认）";
                 }
             }
         }
@@ -627,6 +650,11 @@ class AuditService
             return null;
         }
         $issues = [];
+        if (!is_dir("$dir/src/app/admin")) {
+            // SDK 包（无后台管理端，如 channel-client/oidc-client）：类为公共 API，由外部宿主/调用方消费，
+            // 工作区内零引用是常态，跳过死类判定
+            return ['issues' => [], 'note' => 'SDK 公共 API 包（无 src/app/admin）跳过'];
+        }
         foreach ($this->rootClassRefs($root)['defs'] as $def) {
             if ($def['pkg'] !== strtolower($pkg) && $def['pkg'] !== strtolower(basename($dir))) {
                 continue;
@@ -640,6 +668,9 @@ class AuditService
             if (str_contains($def['rel'], '/controller/')) {
                 continue; // 控制器由 webman 默认路由按类名约定反射加载（非 new 实例化）
             }
+            if (str_contains((string) @file_get_contents($root . '/' . $def['rel']), '@audit-ignore dead_code')) {
+                continue; // 显式豁免标注
+            }
             if (preg_match('~/(middleware|process|validate|upload|support)/~', $def['rel'])) {
                 continue; // 中间件/自定义进程/验证器/上传驱动/框架支撑类：配置或 alias/容器字符串引用，静态无法判定
             }
@@ -647,7 +678,7 @@ class AuditService
             if ($this->rootClassRefs($root)['refs'][$fqcn] ?? false) {
                 continue;
             }
-            $issues[] = "{$def['rel']}: 类 {$def['short']} 全工作区零引用（无 new/静态调用/::class/配置字符串）——死代码候选，人工确认后删除";
+            $issues[] = "{$def['rel']}: 类 {$def['short']} 全工作区零引用（无 new/静态调用/::class/配置字符串/use 导入引用）——死代码候选，人工确认后删除";
         }
         return ['issues' => $issues, 'note' => 'workspace ref scan'];
     }
@@ -706,7 +737,12 @@ class AuditService
         return self::$rootScanCache[$key] = $out;
     }
 
-    /** 全 root 类定义与引用表：['defs' => 类定义列表, 'refs' => fqcn => true] */
+    /** 全 root 类定义与引用表：['defs' => 类定义列表, 'refs' => fqcn => true]
+     *
+     * 引用来源 = 全部 src/config 文件 + 各包 templates/（复制模板，宿主安装后即运行代码）+ 文件内 use 导入表：
+     * - 完整 FQCN：new <FQCN>( / <FQCN>:: / 配置字符串 '<FQCN>'
+     * - 短名/别名（use X / use X as Y）：<短名>:: / new <短名>( / <短名>::class
+     */
     protected function rootClassRefs(string $root): array
     {
         $key = $root . '|refs';
@@ -720,9 +756,17 @@ class AuditService
                 $refs[$fqcn] = false;
             }
         }
-        // 收集全 root 引用：new X( / X:: / X::class / 配置/注册表字符串 'app\...\X'
-        foreach ($this->rootScanFiles($root) as $file) {
+        foreach ($this->rootRefFiles($root) as $file) {
             $src = file_get_contents($file['path']);
+            // 文件级 use 导入表：短名/别名 => 完整 FQCN（含 use X as Y 别名）
+            $imports = [];
+            if (preg_match_all('~use\s+([\\\\\\w]+)\s*(?:as\s+(\w+))?\s*;~', $src, $im, PREG_SET_ORDER)) {
+                foreach ($im as $u) {
+                    $fqcn = ltrim($u[1], '\\');
+                    $short = (string) substr($fqcn, (int) strrpos($fqcn, '\\') + 1);
+                    $imports[($u[2] ?? '') !== '' ? $u[2] : $short] = $fqcn;
+                }
+            }
             foreach ($refs as $fqcn => &$used) {
                 if ($used) {
                     continue;
@@ -737,6 +781,21 @@ class AuditService
                     || preg_match('~new\s+' . $classPart . '~', $src)
                     || preg_match('~' . $classPart . '~', $src)) {
                     $used = true;
+                    continue;
+                }
+                // use 导入的短名/别名引用（:: / ::class / new 构造）
+                if ($imports) {
+                    foreach ($imports as $name => $importFqcn) {
+                        if ($importFqcn === $fqcn && preg_match('~\b' . preg_quote($name, '~') . '(?=\s*::|\s*\()~', $src)) {
+                            $used = true;
+                            break 2;
+                        }
+                    }
+                }
+                // 同包裸短名引用（同命名空间无需 use，如 ai DriverManager::class / happ Events Message::make）
+                if (str_starts_with($file['rel'], ($classes[$fqcn][0]['pkg'] ?? '') . '/')
+                    && preg_match('~\b' . preg_quote($short, '~') . '(?=\s*::|\s*\()~', $src)) {
+                    $used = true;
                 }
             }
             unset($used);
@@ -749,6 +808,31 @@ class AuditService
             }
         }
         return self::$rootScanCache[$key] = ['defs' => $defs, 'refs' => $refs];
+    }
+
+    /**
+     * 引用扫描文件集 = rootScanFiles（src/ + config/）+ 各包 templates/ 复制模板
+     * （宿主安装后即运行的真实代码：模板对业务类的引用属于有效引用）
+     */
+    protected function rootRefFiles(string $root): array
+    {
+        $key = $root . '|refiles';
+        if (isset(self::$rootScanCache[$key])) {
+            return self::$rootScanCache[$key];
+        }
+        $out = $this->rootScanFiles($root);
+        foreach (glob("$root/*/templates", GLOB_ONLYDIR) ?: [] as $tplDir) {
+            $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($tplDir, \FilesystemIterator::SKIP_DOTS));
+            foreach ($it as $file) {
+                if ($file->isFile() && $file->getExtension() === 'php') {
+                    $path = $file->getPathname();
+                    $rel = str_replace($root . '/', '', $path);
+                    $pkg = strtolower(explode('/', $rel)[0] ?? '');
+                    $out[] = ['path' => $path, 'rel' => $rel, 'pkg' => $pkg];
+                }
+            }
+        }
+        return self::$rootScanCache[$key] = $out;
     }
 
     /** 全 root .php 文件内容 hash 分组（src/ + config/，排除 vendor/web/tests/database/templates） */

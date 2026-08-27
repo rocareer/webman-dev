@@ -1,5 +1,25 @@
 # Changelog
 
+## [v3.4.0] - 2026-09-01
+
+### 规则引擎升级（rocareer:audit 精度修复，消除全量误报）
+
+- **死类检测导入感知**：引用扫描支持文件级 `use X / use X as Y` 导入表与同包同命名空间裸短名
+  （`Message::`、`DeepSeekDriver::class`、`new ChannelModel()`），修复 AiChannel/Memory/happ Message/
+  ai 四驱动等"实际在用被判死"的误报；`templates/` 复制模板计入引用来源（宿主安装后即运行的真实代码，
+  修复 OIDC 邮件/短信服务误报）。
+- **SDK 公共 API 豁免**：无 `src/app/admin` 的包（channel-client/oidc-client 等纯 SDK）类为外部宿主消费的
+  公共 API，工作区内零引用是常态，跳过死类判定。
+- **协程混合模式识别**：文件显式声明协程回退（`Coroutine::isCoroutine()` / `inCoroutine()` /
+  `Fiber::getCurrent()`）即视为已实现 CLI 回退（异步铁律允许），跳过 async_blocking，修复
+  OIDC 短信/微信、oidc-client、mcp McpClient 的同步分支误报。
+- **`@audit-ignore <code>` 豁免标注**：async_blocking / superglobal / dead_code / fqcn_dup 四规则支持
+  文件内显式豁免（如队列消费者内同步 SMTP、CLI 超全局回退、radmin 真源同名副本），豁免即文档。
+- **引擎自排查除**：AuditService.php 自身含探测模式字面量（brpop/curl_exec/TODO 正则），
+  residue 与 async_blocking 自扫必误报，按文件名排除。
+- **细节修复**：usleep/sleep 探测排除 `$var()` 调用（`$sleep()` 误报）；超全局同行多次命中按行去重；
+  fqcn_dup 跳过带豁免标注的副本文件后判断。
+
 ## [v3.3.1] - 2026-09-01
 
 ### 代码清理与修复
