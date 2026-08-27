@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.3.0 - 2026-08-28
+
+### 新增 5 条工程质量审计规则（异步铁律 + 代码质量，2026-08-28 全量审计实战沉淀）
+
+- **async_blocking 异步阻塞扫描**：常驻进程代码（`src/app`，排除 CLI command/Install/Fiber 封装）内
+  BRPOP 长拉 / 同步 Guzzle HTTP / 同步 SMTP / curl_exec / usleep/sleep 阻塞事件循环全部报出
+  （来源：channel 20s BRPOP 占死 worker、OIDC 短信/邮件同步发送、radmin get_ba_client 等实战案例）。
+- **fqcn_dup 同名类冲突**：全工作区 namespace+class 对去重，同一 FQCN 多文件定义（含 PSR-4 加载不到的死副本）即报
+  （来源：support\\StatusCode 三份同名定义实战）。
+- **superglobal 超全局直读**：worker 内 `$_COOKIE/$_SERVER` 直读报出，提示走 `support\\Context` + `Request`
+  （来源：oidc-client 设备透传失效实战；本次上线即捕获 radmin 3 处）。
+- **dead_code 死类检测**：全工作区零引用（无 new/静态调用/::class/配置字符串）的非框架类报出
+  （排除控制器/中间件/进程/验证器/上传驱动/support 反射类；来源：webman-migration 750 行死 Table 类实战）。
+- **cross_copy 跨包文件重复**：不同包逐字相同的 .php 文件报出（排除多应用 lang 语言包）
+  （来源：memory/knowledge cosine、ai emitUsage、crontab Fiber/Logger 复制实战）。
+- 默认审计包列表补全 crontab/tiktoken/mcp/webman-status-code/webman-dev（此前遗漏）。
+- 后台「工程质量审计」规则种子迁移 `20261028140000_radmin_webman_dev_audit_rules_v2`（幂等，需 migrate:run）。
+
 ## 未发布（Unreleased）
 
 ### 许可与版权

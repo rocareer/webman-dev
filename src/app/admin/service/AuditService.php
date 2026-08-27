@@ -26,6 +26,11 @@ class AuditService
         'residue' => ['title' => '残留扫描', 'description' => 'CRUD 脚手架死代码（Test 控制器/模型/验证器）+ TODO/FIXME 计数'],
         'version' => ['title' => '版本同步', 'description' => 'CHANGELOG 头部版本 vs dev/full composer.json path 钉版'],
         'web_page' => ['title' => '前端页面规范', 'description' => 'Vue 页面模板一致性：禁止自创依赖注入/裸 axios//src/ 导入、baTable 体系页面必须经 baTable、弹窗提交走 onSubmit（radmin 同步树跳过）'],
+        'async_blocking' => ['title' => '异步阻塞扫描', 'description' => '异步铁律：常驻进程代码（src/app，排除 CLI command/）内禁止 BRPOP 长拉、同步 Guzzle HTTP、同步 SMTP、curl_exec、usleep/sleep 阻塞事件循环'],
+        'fqcn_dup' => ['title' => '同名类冲突', 'description' => '全工作区 namespace+class 对去重：同一 FQCN 被多文件定义（含 PSR-4 加载不到的死副本）即报'],
+        'superglobal' => ['title' => '超全局直读', 'description' => 'webman worker 内直读 $_COOKIE/$_SERVER 不可靠（不自动填充/命名不可配），应走 support\\Context + Request（CLI 场景除外，命中需人工确认）'],
+        'dead_code' => ['title' => '死类检测', 'description' => '全工作区零引用（无 new/静态调用/::class/配置字符串引用）的非框架类 = 死代码候选'],
+        'cross_copy' => ['title' => '跨包文件重复', 'description' => '不同包内容逐字节相同的 .php 文件 = 复制粘贴实现（应下沉共享，防接口漂移）'],
     ];
 
     /** 问题明细入库/返回上限（完整数量在 count） */
@@ -35,6 +40,7 @@ class AuditService
     public const DEFAULT_PACKAGES = [
         'radmin', 'ai', 'memory', 'chat', 'agent', 'knowledge', 'asset',
         'OIDC', 'oidc-client', 'channel', 'channel-client', 'happ', 'webman-migration',
+        'crontab', 'tiktoken', 'mcp', 'webman-status-code', 'webman-dev',
     ];
 
     /**
@@ -118,6 +124,11 @@ class AuditService
             'residue' => 'no src dir',
             'version' => 'version sync: changelog/dev json missing',
             'web_page' => 'web pages: none',
+            'async_blocking' => 'no src/app dir',
+            'fqcn_dup' => 'no classes',
+            'superglobal' => 'no src/app dir',
+            'dead_code' => 'no src dir',
+            'cross_copy' => 'no php files',
         ];
         $packages = [];
         foreach ($pkgs as $name) {
@@ -494,6 +505,298 @@ class AuditService
             }
         }
         return $out;
+    }
+
+    /* ---------- 8. 异步阻塞扫描（异步铁律） ---------- */
+
+    /**
+     * 常驻进程代码内同步阻塞 IO 检查（依据「异步铁律」沉淀规则，审计 2026-08-28 实战）：
+     *   1. 阻塞休眠：usleep(/sleep(（排除 Fiber::sleep / Timer::sleep 封装与封装类自身）
+     *   2. Redis 阻塞长拉：->brpop(
+     *   3. curl_exec（同步）
+     *   4. SMTP 同步发送：$mailer->send( / ->send($email)
+     *   5. 同步 Guzzle：文件 import GuzzleHttp 时的 new Client( / ->post( / ->get( / ->request(
+     * 排除：src/app/command（CLI 一次性脚本）、Install.php、templates/（复制模板）。
+     */
+    protected function checkAsyncBlocking(string $root, string $pkg, string $dir): ?array
+    {
+        $appDir = "$dir/src/app";
+        if (!is_dir($appDir)) {
+            return null;
+        }
+        $issues = [];
+        foreach ($this->phpFiles($appDir) as $file) {
+            $rel = str_replace($root . '/', '', $file);
+            $base = basename($file);
+            if ($base === 'Install.php' || $base === 'Fiber.php') {
+                continue; // Install 钩子；Fiber.php 为 Fiber::sleep 封装实现（usleep 合法）
+            }
+            if (str_contains($rel, '/command/')) {
+                continue;
+            }
+            $lines = file($file) ?: [];
+            $usesGuzzle = false;
+            foreach ($lines as $line) {
+                if (preg_match('~use\s+[\\\\A-Za-z]*GuzzleHttp[\\\\A-Za-z]*\\\\Client\s*;~', $line)) {
+                    $usesGuzzle = true;
+                    break;
+                }
+            }
+            foreach ($lines as $i => $line) {
+                $ln = $i + 1;
+                $t = trim($line);
+                if ($t === '' || str_starts_with($t, '//') || str_starts_with($t, '*') || str_starts_with($t, '/*')) {
+                    continue;
+                }
+                // 阻塞休眠（Fiber/Timer 封装安全；self::/static:: 为封装类内部定义）
+                if (preg_match('~\b(?:usleep|sleep)\s*\(~', $line) && !preg_match('~(?:Fiber|Timer)::sleep|function\s+(?:usleep|sleep)~', $line)) {
+                    $issues[] = "$rel:$ln: 阻塞休眠 usleep/sleep（应使用 Fiber::sleep / Timer::sleep 挂起协程）";
+                }
+                if (str_contains($line, '->brpop(')) {
+                    $issues[] = "$rel:$ln: 同步 BRPOP 长拉（占死 worker；长轮询应改客户端驱动轮询）";
+                }
+                if (str_contains($line, 'curl_exec(')) {
+                    $issues[] = "$rel:$ln: curl_exec 同步阻塞（应走 workerman/http-client 协程）";
+                }
+                if (preg_match('~\$mailer->send\(|->send\(\s*\$email~', $line)) {
+                    $issues[] = "$rel:$ln: 同步 SMTP 发送（应投递 redis-queue 异步执行）";
+                }
+                if ($usesGuzzle && preg_match('~\$client->(?:post|get|request)\s*\(|new\s+Client\s*\(~', $line)) {
+                    $issues[] = "$rel:$ln: 同步 Guzzle HTTP（常驻进程应走 workerman/http-client 协程；CLI 才回退 Guzzle）";
+                }
+            }
+        }
+        return ['issues' => $issues, 'note' => 'src/app scanned'];
+    }
+
+    /* ---------- 9. 同名类冲突（全工作区 FQCN 去重） ---------- */
+
+    protected function checkFqcnDup(string $root, string $pkg, string $dir): ?array
+    {
+        if (!is_dir("$dir/src")) {
+            return null;
+        }
+        $issues = [];
+        foreach ($this->rootClasses($root) as $fqcn => $locations) {
+            if (count($locations) < 2) {
+                continue;
+            }
+            $involved = false;
+            $paths = [];
+            foreach ($locations as $loc) {
+                $paths[] = $loc['rel'];
+                if ($loc['pkg'] === strtolower($pkg) || $loc['pkg'] === strtolower(basename($dir))) {
+                    $involved = true;
+                }
+            }
+            if ($involved) {
+                $issues[] = "FQCN $fqcn 被多文件定义：" . implode(' 与 ', $paths);
+            }
+        }
+        return ['issues' => $issues, 'note' => 'workspace FQCN scan'];
+    }
+
+    /* ---------- 10. 超全局直读（worker 内） ---------- */
+
+    protected function checkSuperglobal(string $root, string $pkg, string $dir): ?array
+    {
+        $appDir = "$dir/src/app";
+        if (!is_dir($appDir)) {
+            return null;
+        }
+        $issues = [];
+        foreach ($this->phpFiles($appDir) as $file) {
+            $rel = str_replace($root . '/', '', $file);
+            if (basename($file) === 'Install.php' || str_contains($rel, '/command/')) {
+                continue;
+            }
+            foreach (file($file) ?: [] as $i => $line) {
+                if (preg_match('~\$_(?:COOKIE|SERVER)\s*\[~', $line)) {
+                    $issues[] = "$rel:" . ($i + 1) . ': 直读超全局（webman worker 不自动填充，应走 support\\Context + Request；CLI 场景人工确认）';
+                }
+            }
+        }
+        return ['issues' => $issues, 'note' => 'src/app scanned'];
+    }
+
+    /* ---------- 11. 死类检测（全工作区零引用） ---------- */
+
+    protected function checkDeadCode(string $root, string $pkg, string $dir): ?array
+    {
+        if (!is_dir("$dir/src")) {
+            return null;
+        }
+        $issues = [];
+        foreach ($this->rootClassRefs($root)['defs'] as $def) {
+            if ($def['pkg'] !== strtolower($pkg) && $def['pkg'] !== strtolower(basename($dir))) {
+                continue;
+            }
+            if ($def['abstract'] || $def['kind'] !== 'class') {
+                continue; // 抽象类/接口/枚举无直接实例化语义
+            }
+            if (preg_match('~(Install|Migration|Model|Consumer|Tool|Interface|Trait|Exception|Controller)$~', $def['short'])) {
+                continue; // 框架反射/注册表字符串实例化，无法静态判定
+            }
+            if (str_contains($def['rel'], '/controller/')) {
+                continue; // 控制器由 webman 默认路由按类名约定反射加载（非 new 实例化）
+            }
+            if (preg_match('~/(middleware|process|validate|upload|support)/~', $def['rel'])) {
+                continue; // 中间件/自定义进程/验证器/上传驱动/框架支撑类：配置或 alias/容器字符串引用，静态无法判定
+            }
+            $fqcn = $def['fqcn'];
+            if ($this->rootClassRefs($root)['refs'][$fqcn] ?? false) {
+                continue;
+            }
+            $issues[] = "{$def['rel']}: 类 {$def['short']} 全工作区零引用（无 new/静态调用/::class/配置字符串）——死代码候选，人工确认后删除";
+        }
+        return ['issues' => $issues, 'note' => 'workspace ref scan'];
+    }
+
+    /* ---------- 12. 跨包文件重复（内容逐字相同） ---------- */
+
+    protected function checkCrossCopy(string $root, string $pkg, string $dir): ?array
+    {
+        if (!is_dir("$dir/src") && !is_dir("$dir/config")) {
+            return null;
+        }
+        $issues = [];
+        foreach ($this->rootFileHashes($root) as $hash => $files) {
+            if (count($files) < 2) {
+                continue;
+            }
+            $involved = false;
+            foreach ($files as $f) {
+                if ($f['pkg'] === strtolower($pkg) || $f['pkg'] === strtolower(basename($dir))) {
+                    $involved = true;
+                }
+            }
+            if (!$involved) {
+                continue;
+            }
+            $issues[] = '逐字重复：' . implode(' 与 ', array_map(fn($f) => $f['rel'], $files)) . '（应下沉共享实现，防复制漂移）';
+        }
+        return ['issues' => $issues, 'note' => 'workspace hash scan'];
+    }
+
+    /* ---------- root 级扫描辅助（单轮静态缓存） ---------- */
+
+    /** @var array<string, mixed> 单轮 root 级扫描缓存（root+type => 结果） */
+    private static array $rootScanCache = [];
+
+    /** 全 root 类定义：fqcn => [{pkg, rel, short, abstract, kind}]（排除 vendor/web/tests/database/templates） */
+    protected function rootClasses(string $root): array
+    {
+        $key = $root . '|classes';
+        if (isset(self::$rootScanCache[$key])) {
+            return self::$rootScanCache[$key];
+        }
+        $out = [];
+        foreach ($this->rootScanFiles($root) as $file) {
+            $info = $this->parseClass($file['path']);
+            if (!$info || !$info['class']) {
+                continue;
+            }
+            $fqcn = ($info['namespace'] !== '' ? $info['namespace'] . '\\' : '') . $info['class'];
+            $loc = ['pkg' => $file['pkg'], 'rel' => $file['rel'], 'short' => $info['class'], 'abstract' => false, 'kind' => 'class'];
+            if (preg_match('~abstract\s+class~', file_get_contents($file['path']))) {
+                $loc['abstract'] = true;
+            }
+            $out[$fqcn][] = $loc;
+        }
+        return self::$rootScanCache[$key] = $out;
+    }
+
+    /** 全 root 类定义与引用表：['defs' => 类定义列表, 'refs' => fqcn => true] */
+    protected function rootClassRefs(string $root): array
+    {
+        $key = $root . '|refs';
+        if (isset(self::$rootScanCache[$key])) {
+            return self::$rootScanCache[$key];
+        }
+        $classes = $this->rootClasses($root);
+        $refs = [];
+        foreach ($classes as $fqcn => $locs) {
+            foreach ($locs as $loc) {
+                $refs[$fqcn] = false;
+            }
+        }
+        // 收集全 root 引用：new X( / X:: / X::class / 配置/注册表字符串 'app\...\X'
+        foreach ($this->rootScanFiles($root) as $file) {
+            $src = file_get_contents($file['path']);
+            foreach ($refs as $fqcn => &$used) {
+                if ($used) {
+                    continue;
+                }
+                $short = substr($fqcn, (int) strrpos($fqcn, '\\') + 1);
+                $suffix = substr($fqcn, (int) strrpos($fqcn, '\\') + 1);
+                $classPart = '\\\\' . preg_quote($suffix, '~') . '(\s*[(:;]|\s*::|::class)';
+                $nsPart = str_replace('\\', '\\\\', preg_quote($fqcn, '~'));
+                if (preg_match('~new\s+' . $nsPart . '\s*\(~', $src)
+                    || preg_match('~' . $nsPart . '::~', $src)
+                    || preg_match("~'?" . $nsPart . "~", $src)
+                    || preg_match('~new\s+' . $classPart . '~', $src)
+                    || preg_match('~' . $classPart . '~', $src)) {
+                    $used = true;
+                }
+            }
+            unset($used);
+        }
+        $defs = [];
+        foreach ($classes as $fqcn => $locs) {
+            foreach ($locs as $loc) {
+                $loc['fqcn'] = $fqcn;
+                $defs[] = $loc;
+            }
+        }
+        return self::$rootScanCache[$key] = ['defs' => $defs, 'refs' => $refs];
+    }
+
+    /** 全 root .php 文件内容 hash 分组（src/ + config/，排除 vendor/web/tests/database/templates） */
+    protected function rootFileHashes(string $root): array
+    {
+        $key = $root . '|hashes';
+        if (isset(self::$rootScanCache[$key])) {
+            return self::$rootScanCache[$key];
+        }
+        $groups = [];
+        foreach ($this->rootScanFiles($root) as $file) {
+            if (str_contains($file['rel'], '/lang/')) {
+                continue; // 多应用语言包同步是常规做法（user/api 双应用共用文案），不算复制漂移
+            }
+            $size = filesize($file['path']);
+            if ($size < 60) {
+                continue;
+            }
+            $hash = md5_file($file['path']);
+            $groups[$hash][] = ['pkg' => $file['pkg'], 'rel' => $file['rel']];
+        }
+        // 只保留确实跨路径重复的组（过滤同文件自身）
+        $dup = array_filter($groups, fn($g) => count($g) >= 2 && count(array_unique(array_column($g, 'rel'))) >= 2);
+        return self::$rootScanCache[$key] = $dup;
+    }
+
+    /** 全 root 待扫 .php 文件（src/ 与 config/，排除 vendor/web/tests/database/templates/） */
+    protected function rootScanFiles(string $root): array
+    {
+        $key = $root . '|files';
+        if (isset(self::$rootScanCache[$key])) {
+            return self::$rootScanCache[$key];
+        }
+        $out = [];
+        $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS));
+        foreach ($it as $file) {
+            if (!$file->isFile() || $file->getExtension() !== 'php') {
+                continue;
+            }
+            $path = $file->getPathname();
+            if (preg_match('~/(vendor|web|tests|database|templates|node_modules)/~', $path)) {
+                continue;
+            }
+            $rel = str_replace($root . '/', '', $path);
+            $pkg = strtolower(explode('/', $rel)[0] ?? '');
+            $out[] = ['path' => $path, 'rel' => $rel, 'pkg' => $pkg];
+        }
+        return self::$rootScanCache[$key] = $out;
     }
 
     /* ---------- 解析工具（token_get_all，无正则转义） ---------- */

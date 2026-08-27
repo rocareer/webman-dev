@@ -109,6 +109,11 @@ class Audit extends Command
             'residue' => 'residue',
             'version' => 'version sync',
             'web_page' => 'web pages',
+            'async_blocking' => 'async blocking',
+            'fqcn_dup' => 'FQCN duplicates',
+            'superglobal' => 'superglobals',
+            'dead_code' => 'dead classes',
+            'cross_copy' => 'cross-package copies',
         ][$code] ?? $code;
     }
 
