@@ -256,12 +256,6 @@ class AuditService
                 $issues[] = "$rel: extends {$info['extends']} != Backend";
             }
             $src = file_get_contents($file);
-            if (str_contains($src, '?Response')) {
-                $issues[] = "$rel: uses ?Response (should be : Response)";
-            }
-            if (str_contains($src, 'return null;') && str_contains($src, '?Response')) {
-                $issues[] = "$rel: contains 'return null;'";
-            }
             if (in_array('initialize', $info['methods'], true) && !str_contains($src, 'parent::initialize()')) {
                 $issues[] = "$rel: initialize() missing parent::initialize()";
             }
@@ -269,8 +263,9 @@ class AuditService
                 if ($method === 'initialize' || !$info['sigs'][$method]) {
                     continue;
                 }
-                if (!str_contains($info['sigs'][$method], ': Response')) {
-                    $issues[] = "$rel::$method missing : Response";
+                // 返回类型：: Response / : ?Response / : HttpResponse / : void 等均可——只拒绝完全无类型声明
+                if (!preg_match('/:\s*\??[A-Za-z_\\\\]+(?:\s*$|\s*[\s(])/', $info['sigs'][$method])) {
+                    $issues[] = "$rel::$method missing return type";
                 }
             }
         }
@@ -286,13 +281,13 @@ class AuditService
         if (!is_dir($ctrlDir) || !is_dir($migDir)) {
             return null;
         }
-        // 迁移中注册的按钮名（x/y/z 三段）
+        // 迁移中注册的按钮名（x/y/z 三段；按钮名可含驼峰如 security/dataRecycleLog/index——统一小写比对）
         $buttons = [];
         foreach ($this->phpFiles($migDir) as $mf) {
             $msrc = file_get_contents($mf);
-            if (preg_match_all("~'([a-z_]+/[a-z_]+/[a-z_-]+)'~", $msrc, $m)) {
+            if (preg_match_all("~['\"]([a-zA-Z_]+/[a-zA-Z_]+/[a-zA-Z_-]+)['\"]~", $msrc, $m)) {
                 foreach ($m[1] as $name) {
-                    $buttons[$name] = true;
+                    $buttons[strtolower($name)] = true;
                 }
             }
         }
@@ -308,8 +303,13 @@ class AuditService
             $fqcn = str_replace('controller\\', '', $info['namespace'] . '\\' . $info['class']);
             $parts = explode('\\', $fqcn);
             $prefix = strtolower(implode('/', array_slice($parts, -2)));
+            // noNeedLogin / noNeedPermission 豁免：公开接口无需按钮节点（防过度设计）
+            $skip = $this->permissionSkips($info);
             foreach ($info['methods'] as $method) {
                 if ($method === 'initialize') {
+                    continue;
+                }
+                if ($skip['all'] || in_array(strtolower($method), $skip['list'], true)) {
                     continue;
                 }
                 $methodCount++;
@@ -531,6 +531,56 @@ class AuditService
             'extends' => $extends,
             'methods' => $methods,
             'sigs' => $sigs,
+            'props' => static::parseProps($src),
         ];
+    }
+
+    /**
+     * 提取公开接口豁免属性（$noNeedLogin / $noNeedPermission）
+     *
+     * 支持：= true / = ['*']（全部方法免检）、= ['login','logout']（指定方法免检）
+     */
+    protected static function parseProps(string $src): array
+    {
+        $props = [];
+        foreach (['noNeedLogin', 'noNeedPermission'] as $name) {
+            if (preg_match('/protected\s+(?:static\s+)?(?:array|bool|mixed)?\s*\$' . $name . '\s*(?:=\s*(.*?))?;/s', $src, $m)) {
+                $expr = trim($m[1] ?? '');
+                if ($expr === 'true') {
+                    $props[$name] = true;
+                } elseif ($expr === 'false' || $expr === '') {
+                    $props[$name] = false;
+                } elseif (preg_match_all("/['\"]([^'\"]+)['\"]/", $expr, $vm)) {
+                    $props[$name] = $vm[1];
+                } else {
+                    $props[$name] = false;
+                }
+            }
+        }
+        return $props;
+    }
+
+    /**
+     * 权限豁免集：['all' => bool, 'list' => string[]]
+     */
+    protected function permissionSkips(array $info): array
+    {
+        $skip = ['all' => false, 'list' => []];
+        foreach (['noNeedLogin', 'noNeedPermission'] as $name) {
+            $v = $info['props'][$name] ?? false;
+            if ($v === true) {
+                $skip['all'] = true;
+            } elseif (is_array($v)) {
+                foreach ($v as $item) {
+                    $item = strtolower(trim((string) $item));
+                    if ($item === '*' || $item === 'true') {
+                        $skip['all'] = true;
+                    } else {
+                        $skip['list'][] = $item;
+                    }
+                }
+            }
+        }
+        return $skip;
     }
 }

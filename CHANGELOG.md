@@ -7,6 +7,16 @@
 - 许可证由开源协议改为 proprietary（商业/内部专有），不适用任何开源许可证；LICENSE 文件同步替换为 Rocareer 专有许可文本。
 - 版权声明统一为：Copyright (c) Rocareer Team. All rights reserved.；作者：albert@rocareer.com。
 
+## v3.1.1 - 2026-08-27
+
+### 审计规则精简与修复（拒绝过度设计，fix）
+
+- controller 规则：`?Response` 不再是问题（SSE 流式 / 可能 null 返回是合法写法）——只拒绝**完全无返回类型**的方法；
+  删掉配套的 `return null;` 检查；
+- permission 规则：① 按钮名支持驼峰并统一小写比对（radmin 按钮如 security/dataRecycleLog/index 此前漏扫误报）；
+  ② 豁免 `$noNeedLogin` / `$noNeedPermission` 声明的方法（公开接口无需按钮节点——给 login/ajax 补按钮才是过度设计）；
+- 实测：全量审计仅剩 agent 版本同步（并发在途，非规则问题）。
+
 ## v3.1.0 - 2026-10-28
 
 ### 新增「工程质量审计」后台管理页（开发运维）
