@@ -32,6 +32,7 @@ class AuditService
         'dead_code' => ['title' => '死类检测', 'description' => '全工作区零引用（无 new/静态调用/::class/配置字符串/use 导入引用）的非框架类 = 死代码候选；SDK 包（无 src/app/admin，公共 API 供外部消费）与标注 @audit-ignore dead_code 的文件跳过'],
         'cross_copy' => ['title' => '跨包文件重复', 'description' => '不同包内容逐字节相同的 .php 文件 = 复制粘贴实现（应下沉共享，防接口漂移）'],
         'dto_contract' => ['title' => 'DTO 分层规范', 'description' => 'DTO 分层门禁：公开 API 控制器（非 admin）手拼多字段数组输出 = 契约未固化，应引入 app/<模块>/dto/ typed DTO 或 Model accessor；dto/ 目录内纯搬运类（toArray 原样返回入参、无整形/强转/脱敏）= 过度设计，直接用数组；目录命名用 dto 不用 data（data 与"数据/数据库"歧义）；文件标注 @audit-ignore dto_contract 显式豁免'],
+        'llm_gate' => ['title' => '全域 LLM 门禁（智能体出口）', 'description' => '全域 LLM 业务必须经 agent 包 AgentGateway（无智能体不开工）：业务代码禁止直接实例化 AiRouterService 调用 LLM/向量化；ai（底层提供者）与 agent（网关）豁免；文件标注 @audit-ignore llm_gate 显式豁免（如 ai 调试/开放 API 运维接口）'],
     ];
 
     /** 问题明细入库/返回上限（完整数量在 count） */
@@ -131,6 +132,7 @@ class AuditService
             'dead_code' => 'no src dir',
             'cross_copy' => 'no php files',
             'dto_contract' => 'no public api controllers',
+            'llm_gate' => 'no src/app dir',
         ];
         $packages = [];
         foreach ($pkgs as $name) {
@@ -748,10 +750,11 @@ class AuditService
         $issues = [];
         $ctrlCount = 0;
 
-        // ---- 1) 公开 API 控制器手拼数组输出（排除 admin/ 后台控制器）----
+        // ---- 1) 公开 API 控制器手拼数组输出（排除 admin/ 后台控制器与 common/controller 基类）----
         foreach ($this->phpFiles($appDir) as $file) {
-            if (!str_contains($file, '/controller/') || str_contains($file, '/admin/')) {
-                continue;
+            if (!str_contains($file, '/controller/') || str_contains($file, '/admin/')
+                || str_contains($file, '/common/controller/')) {
+                continue; // 跳过非控制器 / admin 后台 / 公共基类控制器（Backend/Frontend 等非路由公开端点，避免误计）
             }
             $rel = str_replace($root . '/', '', $file);
             $src = (string) file_get_contents($file);
@@ -825,6 +828,47 @@ class AuditService
         }
 
         return ['issues' => $issues, 'note' => $ctrlCount . ' public api controllers'];
+    }
+
+    /**
+     * 全域 LLM 门禁（v3.8.0，智能体出口）：业务代码禁止直接实例化 AiRouterService。
+     *
+     * 背景（rocareer/agent v2.0 无智能体不开工）：全域 LLM 业务统一经 agent 包
+     * AgentGateway（校验智能体 -> ai 调度/熔断/计费）。直接 `new AiRouterService` 调
+     * chat/chatStream/embeddings 的代码 = 绕过智能体门禁。
+     *
+     * 豁免：
+     * - ai（底层提供者）与 agent（网关实现）两包跳过；
+     * - 文件标注 @audit-ignore llm_gate（如 ai 调试/开放 API 运维接口）；
+     * - 仅 use/常量引用（AiRouterService::BIZ_* / SOURCE_*）不报，只报实例化。
+     */
+    protected function checkLlmGate(string $root, string $pkg, string $dir): ?array
+    {
+        $appDir = "$dir/src/app";
+        if (!is_dir($appDir)) {
+            return null;
+        }
+        if (in_array($pkg, ['ai', 'agent'], true)) {
+            return ['issues' => [], 'note' => 'provider/gateway 包豁免'];
+        }
+        $issues = [];
+        $checked = 0;
+        foreach ($this->phpFiles($appDir) as $file) {
+            $rel = str_replace($root . '/', '', $file);
+            $src = (string) file_get_contents($file);
+            if (str_contains($src, '@audit-ignore llm_gate')) {
+                continue;
+            }
+            $checked++;
+            foreach (file($file) ?: [] as $i => $line) {
+                $ln = $i + 1;
+                // 实例化形态：new AiRouterService( 或 new \app\admin\service\AiRouterService(
+                if (preg_match('~new\s+(?:\\\\app\\\\admin\\\\service\\\\)?AiRouterService\s*\(~', $line)) {
+                    $issues[] = "$rel:$ln: 直接实例化 AiRouterService（应经 agent 包 AgentGateway：智能体门禁，无智能体不开工）——" . trim($line);
+                }
+            }
+        }
+        return ['issues' => $issues, 'note' => $checked . ' files scanned'];
     }
 
     /** 从 $start（'[' 位置）起扫描平衡数组字面量，返回右括号 ] 的位置；未闭合返回 null */

@@ -1,5 +1,18 @@
 # Changelog
 
+## [v3.8.0] - 2026-12-04
+
+### 新增：全域 LLM 门禁审计规则（llm_gate，随 rocareer/agent v2.0）
+
+- 依据「全域 LLM 业务交付给智能体插件管理、无智能体不开工」（agent v2.0 基础设施升级），
+  新增 `llm_gate` 审计规则：
+  - 扫描各包 `src/app` 下**直接实例化 `AiRouterService`**（`new AiRouterService(`）的业务代码 =
+    绕过智能体门禁，报违规并提示改经 agent 包 `AgentGateway`；
+  - **豁免**：ai（底层提供者）与 agent（网关实现）两包跳过；文件标注 `@audit-ignore llm_gate`
+    显式豁免（如 ai 调试/开放 API 运维接口）；仅 use/常量引用（`AiRouterService::BIZ_*` 等）不报。
+- 幂等迁移 `20261204000000` 种子规则进 `radmin_dev_audit_rule`。
+- MCP `quality_audit` 工具 `codes` 参数说明同步补齐 `llm_gate` 规则码。
+
 ## [v3.7.1] - 2026-08-28
 
 ### 修复：dto_contract 豁免标准分页信封
