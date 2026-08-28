@@ -1,5 +1,16 @@
 # Changelog
 
+## [v3.6.0] - 2026-12-03
+
+### 新增：前端按钮样式门禁（web_page 规则第 6 项）
+
+- web_page 规则新增检查：**TableHeader 顶部自定义按钮必须使用标准样式类 `table-header-operate`**
+  （与 refresh/add/delete 等内置按钮同款，禁止自创类名/裸 `<i>` 图标/`&nbsp;` 拼接）。
+  2026-08-28 实战：审计项目页自创 `table-header-audit-run` 非标样式、diancan 桌台页裸图标——
+  全域排查后两处均已修复；规则作为防回潮门禁，静态扫描各包 `web/src/views/backend`。
+- 迁移 `20261203130000_radmin_webman_dev_audit_web_page_button_rule`（幂等）更新
+  web_page 规则说明，后台「审计规则」页描述与引擎元数据同步，需 `migrate:run`。
+
 ## [v3.5.1] - 2026-12-03
 
 ### 修复

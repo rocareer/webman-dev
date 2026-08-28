@@ -25,7 +25,7 @@ class AuditService
         'migration' => ['title' => '迁移时间戳查重', 'description' => 'Phinx 迁移文件时间戳冲突（撞号会阻断全家桶 migrate:run）'],
         'residue' => ['title' => '残留扫描', 'description' => 'CRUD 脚手架死代码（Test 控制器/模型/验证器）+ TODO/FIXME 计数'],
         'version' => ['title' => '版本同步', 'description' => 'CHANGELOG 头部版本 vs dev/full composer.json path 钉版'],
-        'web_page' => ['title' => '前端页面规范', 'description' => 'Vue 页面模板一致性：禁止自创依赖注入/裸 axios//src/ 导入、baTable 体系页面必须经 baTable、弹窗提交走 onSubmit（radmin 同步树跳过）'],
+        'web_page' => ['title' => '前端页面规范', 'description' => 'Vue 页面模板一致性：禁止自创依赖注入/裸 axios//src/ 导入、baTable 体系页面必须经 baTable、弹窗提交走 onSubmit、TableHeader 顶部自定义按钮必须用标准样式类 table-header-operate（radmin 同步树跳过）'],
         'async_blocking' => ['title' => '异步阻塞扫描', 'description' => '异步铁律：常驻进程代码（src/app，排除 CLI command/）内禁止 BRPOP 长拉、同步 Guzzle HTTP、同步 SMTP、curl_exec、usleep/sleep 阻塞事件循环；文件显式声明协程回退（Coroutine::isCoroutine / inCoroutine / Fiber::getCurrent）或标注 @audit-ignore async_blocking 即视为已实现 CLI 回退，跳过'],
         'fqcn_dup' => ['title' => '同名类冲突', 'description' => '全工作区 namespace+class 对去重：同一 FQCN 被多文件定义（含 PSR-4 加载不到的死副本）即报；文件标注 @audit-ignore fqcn_dup 视为有意的真源同步副本'],
         'superglobal' => ['title' => '超全局直读', 'description' => 'webman worker 内直读 $_COOKIE/$_SERVER 不可靠（不自动填充/命名不可配），应走 support\\Context + Request；文件标注 @audit-ignore superglobal 视为已声明 CLI/回退路径人工确认'],
@@ -440,12 +440,14 @@ class AuditService
     /**
      * 前端页面规范检查（静态扫描 <pkg>/web/src/views/backend 下的 Vue 页面）
      *
-     * 依据工作区「模板优先、禁止从零手写」前端硬性规范（五项，全部低误报）：
+     * 依据工作区「模板优先、禁止从零手写」前端硬性规范（六项，全部低误报）：
      *   1. 禁止自创依赖注入（本 fork 仅 baTable 有 provide；inject('config') 曾致弹窗渲染崩溃）
      *   2. 禁止裸 import axios（必须 /@/utils/axios 的 createAxios 统一封装）
      *   3. 引用 baTable 体系组件（TableHeader/Table/PopupForm）必须初始化 baTable（禁止自建表格绕过 baTable）
      *   4. 编辑弹窗必须走 baTable.onSubmit 提交（禁止绕过 baTable 手写请求）
      *   5. 禁止 /src/ 根路径导入（应使用 /@/ 别名）
+     *   6. TableHeader 顶部自定义按钮必须用标准样式类 table-header-operate（2026 实战：审计项目页
+     *      曾自创 table-header-audit-run 非标样式；crud/log 等内置页同款约定）
      * 说明：radmin 包的 web 树是各包/业务工程页面的同步汇聚区（真源在各包 web/），跳过避免归属错乱。
      * 表单字段与后端入参一致性暂为人工复核项（静态无法区分标准 CRUD 弹窗与特殊/透传弹窗，易误报）。
      */
@@ -492,6 +494,21 @@ class AuditService
             // 5) /src/ 根路径导入
             if (preg_match("~from\s*['\"]\/src\/~", $src)) {
                 $issues[] = "$rel: 使用 /src/ 根路径导入（应使用 /@/ 别名）";
+            }
+            // 6) TableHeader 顶部自定义按钮必须用标准样式类 table-header-operate
+            //    （仅检查默认/具名插槽内 el-button，标签取引号感知整段，避免 :disabled="a > 0" 等截断）
+            if (preg_match_all('~<TableHeader\b(?:"[^"]*"|\'[^\']*\'|[^"\'>])*>([\s\S]*?)</TableHeader>~', $src, $hdrBlocks)) {
+                foreach ($hdrBlocks[1] as $block) {
+                    if (!preg_match_all('~<el-button\b(?:"[^"]*"|\'[^\']*\'|[^"\'>])*>~', $block, $btnTags)) {
+                        continue;
+                    }
+                    foreach ($btnTags[0] as $tag) {
+                        if (preg_match('~class\s*=\s*"[^"]*\btable-header-operate\b~', $tag) !== 1) {
+                            $issues[] = "$rel: TableHeader 顶部自定义按钮未使用标准样式类 table-header-operate（应复制 crud/log 等内置页同款，禁止自创类名/裸 <i> 图标/&nbsp; 拼接）";
+                            break; // 每文件报一条即可，避免刷屏
+                        }
+                    }
+                }
             }
         }
         return ['issues' => $issues, 'note' => count($vueFiles) . ' vue files'];
