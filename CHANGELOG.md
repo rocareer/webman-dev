@@ -1,5 +1,13 @@
 # Changelog
 
+## [v3.8.1] - 2026-12-06
+
+### 修复：审计规则种子迁移排序（全 PG 迁移通道前置）
+- `radmin_webman_dev_audit_dto_contract_rule` 文件名时间戳 20260828150000 → 20261028125000：
+  此前先于建表迁移 `radmin_webman_dev_audit_page`（20261028120000）执行，全新库
+  （MySQL 或 PG）会因 `ra_radmin_dev_audit_rule` 不存在而失败；改名后置于建表之后、
+  其余规则种子之前。老库 phinxlog 已记录旧版本号，重跑时按 name 去重幂等，无重复数据。
+
 ## [v3.8.0] - 2026-12-04
 
 ### 新增：全域 LLM 门禁审计规则（llm_gate，随 rocareer/agent v2.0）
