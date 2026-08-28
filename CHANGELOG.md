@@ -1,5 +1,14 @@
 # Changelog
 
+## [v3.6.1] - 2026-12-03
+
+### 修复
+
+- **v3.6.0 迁移兼容修复**：`20261203130000` 迁移改用 `execute($sql, $params)` PDO 参数绑定
+  更新规则说明——原 `getAdapter()->quote()` 在 Phinx `TimedOutputAdapter` 包装下不存在，
+  导致 `migrate:run` 报「Call to undefined method TimedOutputAdapter::quote()」；现可正常
+  在 cc-knowledge 等宿主执行。幂等逻辑不变（description 一致时跳过）。
+
 ## [v3.6.0] - 2026-12-03
 
 ### 新增：前端按钮样式门禁（web_page 规则第 6 项）

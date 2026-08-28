@@ -18,9 +18,10 @@ class RadminWebmanDevAuditWebPageButtonRule extends AbstractMigration
 
         $row = $this->fetchRow("SELECT id, description FROM {$table} WHERE name = 'web_page' LIMIT 1");
         if ($row && (string) $row['description'] !== $description) {
+            // execute($sql, $params) 走 PDO 预处理，避免手工转义中文/引号
             $this->execute(
-                "UPDATE {$table} SET description = " . $this->getAdapter()->quote($description)
-                . ", update_time = {$now} WHERE id = " . (int) $row['id']
+                "UPDATE {$table} SET description = ?, update_time = ? WHERE name = 'web_page'",
+                [$description, $now]
             );
         }
     }
