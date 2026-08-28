@@ -770,7 +770,13 @@ class AuditService
                 if ($scan !== null) {
                     $body = substr($src, $bracket + 1, $scan - $bracket - 1);
                     $pairs = preg_match_all('~=>~', $body);
-                    if ($pairs >= 2 && str_contains($body, "\n")) {
+                    // 标准分页信封 {list,total,page,limit} 为平台级通用契约（各列表接口统一），
+                    // 不属于模块契约，豁免不报（模块契约是 items 形状，由 1b 项检查）
+                    $isPaginationEnvelope = str_contains($body, "'list' =>")
+                        && str_contains($body, "'total' =>")
+                        && str_contains($body, "'page' =>")
+                        && str_contains($body, "'limit' =>");
+                    if ($pairs >= 2 && str_contains($body, "\n") && !$isPaginationEnvelope) {
                         $ln = substr_count(substr($src, 0, $m[0][1]), "\n") + 1;
                         $issues[] = "$rel:$ln: 公开 API 手拼 {$pairs} 字段数组输出（契约未固化）——应引入 app/<模块>/dto/ typed DTO 或 Model accessor";
                     }

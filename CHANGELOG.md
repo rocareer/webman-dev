@@ -1,5 +1,13 @@
 # Changelog
 
+## [v3.7.1] - 2026-08-28
+
+### 修复：dto_contract 豁免标准分页信封
+
+- `dto_contract` 规则修正误报：标准分页信封 `{list,total,page,limit}` 为平台级通用契约
+  （各列表接口统一返回），不属于模块契约，豁免不再提示；模块契约落在列表项形状（`items[]` 项检查覆盖）。
+- 配套：asset 列表信封（/asset/api/assets）不再报；asset 分类项/资源项按试点 DTO 化后资产包 dto_contract 转绿。
+
 ## [v3.7.0] - 2026-08-28
 
 ### 新增：DTO 分层规范审计规则（dto_contract）
