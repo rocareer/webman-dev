@@ -31,6 +31,7 @@ class AuditService
         'superglobal' => ['title' => '超全局直读', 'description' => 'webman worker 内直读 $_COOKIE/$_SERVER 不可靠（不自动填充/命名不可配），应走 support\\Context + Request；文件标注 @audit-ignore superglobal 视为已声明 CLI/回退路径人工确认'],
         'dead_code' => ['title' => '死类检测', 'description' => '全工作区零引用（无 new/静态调用/::class/配置字符串/use 导入引用）的非框架类 = 死代码候选；SDK 包（无 src/app/admin，公共 API 供外部消费）与标注 @audit-ignore dead_code 的文件跳过'],
         'cross_copy' => ['title' => '跨包文件重复', 'description' => '不同包内容逐字节相同的 .php 文件 = 复制粘贴实现（应下沉共享，防接口漂移）'],
+        'dto_contract' => ['title' => 'DTO 分层规范', 'description' => 'DTO 分层门禁：公开 API 控制器（非 admin）手拼多字段数组输出 = 契约未固化，应引入 app/<模块>/dto/ typed DTO 或 Model accessor；dto/ 目录内纯搬运类（toArray 原样返回入参、无整形/强转/脱敏）= 过度设计，直接用数组；目录命名用 dto 不用 data（data 与"数据/数据库"歧义）；文件标注 @audit-ignore dto_contract 显式豁免'],
     ];
 
     /** 问题明细入库/返回上限（完整数量在 count） */
@@ -129,6 +130,7 @@ class AuditService
             'superglobal' => 'no src/app dir',
             'dead_code' => 'no src dir',
             'cross_copy' => 'no php files',
+            'dto_contract' => 'no public api controllers',
         ];
         $packages = [];
         foreach ($pkgs as $name) {
@@ -724,6 +726,138 @@ class AuditService
             $issues[] = '逐字重复：' . implode(' 与 ', array_map(fn($f) => $f['rel'], $files)) . '（应下沉共享实现，防复制漂移）';
         }
         return ['issues' => $issues, 'note' => 'workspace hash scan'];
+    }
+
+    /* ---------- 13. DTO 分层规范（公开契约门禁） ---------- */
+
+    /**
+     * DTO 分层门禁（依据「编码规范 · DTO 分层规范」沉淀规则）：
+     *   1. 公开 API 控制器（app 下非 admin 的 controller）内 `$this->success('', [ ...多字段... ])`
+     *      或 `$items[] = [ ...多字段... ]` 手拼数组输出 = 契约未固化，应引入 app/<模块>/dto/ typed DTO
+     *      或改用 Model accessor（admin CRUD 除外，不检查）；
+     *   2. dto/ 目录下纯搬运类：toArray() 原样返回构造入参数组、无字段整形/强转/脱敏 = 过度设计，直接用数组；
+     *   3. 目录命名用 dto，禁止 data/（与"数据/数据库"歧义）。
+     * 豁免：文件标注 @audit-ignore dto_contract 显式声明。
+     */
+    protected function checkDtoContract(string $root, string $pkg, string $dir): ?array
+    {
+        $appDir = "$dir/src/app";
+        if (!is_dir($appDir)) {
+            return null;
+        }
+        $issues = [];
+        $ctrlCount = 0;
+
+        // ---- 1) 公开 API 控制器手拼数组输出（排除 admin/ 后台控制器）----
+        foreach ($this->phpFiles($appDir) as $file) {
+            if (!str_contains($file, '/controller/') || str_contains($file, '/admin/')) {
+                continue;
+            }
+            $rel = str_replace($root . '/', '', $file);
+            $src = (string) file_get_contents($file);
+            if (!preg_match('~\bextends\s+[\w\\\\]*Api\b~', $src)) {
+                continue; // 非公开 API 控制器（未继承 Api 基类）
+            }
+            if (str_contains($src, '@audit-ignore dto_contract')) {
+                continue; // 显式豁免标注
+            }
+            $ctrlCount++;
+            // 1a) $this->success('', [ ... ]) 手拼多字段输出
+            $offset = 0;
+            while (preg_match('~\$this->success\(\s*[\'"][^\'"]*[\'"]\s*,\s*\[~', $src, $m, PREG_OFFSET_CAPTURE, $offset)) {
+                $bracket = strpos($src, '[', $m[0][1]);
+                $scan = $this->scanBalanced($src, $bracket);
+                if ($scan !== null) {
+                    $body = substr($src, $bracket + 1, $scan - $bracket - 1);
+                    $pairs = preg_match_all('~=>~', $body);
+                    if ($pairs >= 2 && str_contains($body, "\n")) {
+                        $ln = substr_count(substr($src, 0, $m[0][1]), "\n") + 1;
+                        $issues[] = "$rel:$ln: 公开 API 手拼 {$pairs} 字段数组输出（契约未固化）——应引入 app/<模块>/dto/ typed DTO 或 Model accessor";
+                    }
+                }
+                $offset = $m[0][1] + strlen($m[0][0]);
+            }
+            // 1b) $items[] = [ ...多字段... ] 列表项手拼
+            $offset = 0;
+            while (preg_match('~\$[A-Za-z_][A-Za-z0-9_]*\[\]\s*=\s*\[~', $src, $m, PREG_OFFSET_CAPTURE, $offset)) {
+                $literalStart = $m[0][1] + strlen($m[0][0]) - 1;
+                $scan = $this->scanBalanced($src, $literalStart);
+                if ($scan !== null) {
+                    $body = substr($src, $literalStart + 1, $scan - $literalStart - 1);
+                    $pairs = preg_match_all('~=>~', $body);
+                    if ($pairs >= 2 && str_contains($body, "\n")) {
+                        $ln = substr_count(substr($src, 0, $m[0][1]), "\n") + 1;
+                        $issues[] = "$rel:$ln: 公开 API 列表项手拼 {$pairs} 字段数组（契约未固化）——应引入 app/<模块>/dto/ typed DTO 固化列表项形状";
+                    }
+                }
+                $offset = $m[0][1] + strlen($m[0][0]);
+            }
+        }
+
+        // ---- 2) dto/ 目录纯搬运类 + 3) 目录命名门禁 ----
+        foreach ($this->phpFiles($appDir) as $file) {
+            if (str_contains($file, '/dto/')) {
+                $rel = str_replace($root . '/', '', $file);
+                $src = (string) file_get_contents($file);
+                if (str_contains($src, '@audit-ignore dto_contract')) {
+                    continue;
+                }
+                // 纯搬运：toArray() 方法体只 return 单个属性（构造入参原样），无字段处理
+                if (preg_match('~function\s+toArray\s*\([^)]*\)\s*(?::\s*array)?\s*\{\s*return\s+\$this->(\w+)\s*;\s*\}~s', $src, $pm)) {
+                    $ln = substr_count(substr($src, 0, strpos($src, 'function toArray')), "\n") + 1;
+                    $issues[] = "$rel:$ln: 纯搬运 DTO（toArray 原样返回 \$this->{$pm[1]}，无字段整形/强转/脱敏）= 过度设计，直接用数组";
+                }
+                continue;
+            }
+            // 3) app 下存在 data/ 目录（与 dto 同级位置）——命名门禁
+            if (str_contains($file, '/data/')) {
+                $rel = str_replace($root . '/', '', $file);
+                if (str_contains($rel, '/app/') && !str_contains($rel, '/lang/')) {
+                    $issues[] = "$rel: 目录命名用了 data/（与「数据/数据库」歧义）——应改名为 dto/";
+                }
+            }
+        }
+
+        return ['issues' => $issues, 'note' => $ctrlCount . ' public api controllers'];
+    }
+
+    /** 从 $start（'[' 位置）起扫描平衡数组字面量，返回右括号 ] 的位置；未闭合返回 null */
+    protected function scanBalanced(string $src, int $start): ?int
+    {
+        $depth = 0;
+        $len = strlen($src);
+        $inStr = null; // null / "'" / '"'
+        $esc = false;
+        for ($i = $start; $i < $len; $i++) {
+            $c = $src[$i];
+            if ($inStr !== null) {
+                if ($esc) {
+                    $esc = false;
+                    continue;
+                }
+                if ($c === '\\') {
+                    $esc = true;
+                    continue;
+                }
+                if ($c === $inStr) {
+                    $inStr = null;
+                }
+                continue;
+            }
+            if ($c === "'" || $c === '"') {
+                $inStr = $c;
+                continue;
+            }
+            if ($c === '[') {
+                $depth++;
+            } elseif ($c === ']') {
+                $depth--;
+                if ($depth === 0) {
+                    return $i;
+                }
+            }
+        }
+        return null;
     }
 
     /* ---------- root 级扫描辅助（单轮静态缓存） ---------- */

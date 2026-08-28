@@ -1,5 +1,18 @@
 # Changelog
 
+## [v3.7.0] - 2026-08-28
+
+### 新增：DTO 分层规范审计规则（dto_contract）
+
+- 依据「编码规范 · DTO 分层规范」（AGENTS.md，2026-08-28 全域排查沉淀），新增 `dto_contract` 审计规则：
+  - **公开 API 契约门禁**：非 admin 的公开 API 控制器内 `$this->success('', [...])` 手拼多字段数组
+    或 `$items[] = [...]` 手拼列表项 = 契约未固化，提示引入 `app/<模块>/dto/` typed DTO 或 Model accessor；
+  - **过度设计门禁**：`dto/` 目录内纯搬运类（`toArray()` 原样返回构造入参、无字段整形/强转/脱敏）= 过度设计，直接用数组；
+  - **命名门禁**：目录统一用 `dto`，发现 `data/` 命名的数据契约目录提示改名（`data` 与"数据/数据库"歧义）。
+  - 文件标注 `@audit-ignore dto_contract` 显式豁免。
+- 幂等迁移 `20260828150000_radmin_webman_dev_audit_dto_contract_rule` 种子规则进 `radmin_dev_audit_rule`。
+- MCP `quality_audit` 工具 `codes` 参数说明同步补齐全部规则码。
+
 ## [v3.6.1] - 2026-12-03
 
 ### 修复
