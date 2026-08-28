@@ -1,6 +1,6 @@
 <template>
     <div class="default-main ba-table-box">
-        <el-alert class="ba-table-alert" title="工程质量审计 → 审计项目：项目 = 工作区 src 根下的一个包目录；点「运行审计」对本轮启用的项目执行全部启用规则，结果落库并回填最近一轮快照（问题总数/未通过规则）。运行审计为同步操作，项目较多时约需几秒。" type="info" show-icon />
+        <el-alert class="ba-table-alert" title="工程质量审计 → 审计项目：项目 = 工作区 src 根下的一个包目录；点「运行审计」对本轮启用的项目执行全部启用规则，结果落库并回填最近一轮快照（问题总数/未通过规则）。运行审计为同步操作，全量项目约需 1 分钟左右，期间请勿关闭页面/重复点击。" type="info" show-icon />
 
         <!-- 顶部统计条 -->
         <div v-if="stats" class="audit-stats ba-table-alert">
@@ -20,7 +20,7 @@
             :buttons="['refresh', 'add', 'delete', 'quickSearch', 'columnDisplay']"
             :quick-search-placeholder="t('Quick search placeholder', { fields: '包名/项目名' })"
         >
-            <el-button v-blur :loading="running" type="success" class="table-header-audit-run" @click="runAudit([])">
+            <el-button v-blur :loading="running" type="success" class="table-header-operate" @click="runAudit([])">
                 <Icon name="fa fa-search" />
                 <span class="table-header-operate-text">运行全部审计</span>
             </el-button>
@@ -190,7 +190,7 @@ const runAudit = async (ids: number[]) => {
     if (running.value) return
     running.value = true
     try {
-        const res = await createAxios({ url: '/admin/audit.AuditProject/run', method: 'post', data: { ids } })
+        const res = await createAxios({ url: '/admin/audit.AuditProject/run', method: 'post', data: { ids }, timeout: 600000 })
         const data = res.data || {}
         const lines = (data.summary || []).map((p: anyObj) => {
             const icon = p.issue_total > 0 ? '❌' : '✅'
@@ -242,9 +242,6 @@ onMounted(() => {
     border-radius: 4px;
     padding: 10px 14px;
     margin-bottom: 12px;
-}
-.table-header-audit-run {
-    margin-left: 10px;
 }
 .table-row-run {
     color: var(--el-color-success) !important;
