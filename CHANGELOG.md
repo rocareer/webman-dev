@@ -1,5 +1,15 @@
 # Changelog
 
+## [v3.4.1] - 2026-10-20
+
+### 修复
+
+- **无 mcp 宿主崩溃**：`config/plugin/rocareer/webman-dev/event.php` 的
+  `mcp.collections.register` 监听在未安装 rocareer/mcp 的宿主上会因类加载触发 Fatal
+  （AuditCollection implements mcp 接口，interface 不存在）；改为 `interface_exists`
+  守卫后仅在有 mcp 的宿主注册监听（实证：dev/diancan 仅装 radmin+diancan 的宿主可正常
+  migrate:run / start）。
+
 ## [v3.4.0] - 2026-09-01
 
 ### 规则引擎升级（rocareer:audit 精度修复，消除全量误报）
