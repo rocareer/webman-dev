@@ -25,7 +25,7 @@ use Symfony\Component\Console\Helper\ProgressBar;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use Symfony\Component\Console\Question\ConfirmationQuestion;
-use think\File;
+use SplFileInfo;
 
 /**
  * rocareer:plugin 命令——Radmin 插件目录同步工具。
@@ -308,7 +308,7 @@ class RocareerPlugin extends Command
 
             // 2. 添加新文件
             foreach ($changes['added'] as $path) {
-                $sourceFile = new File($sourcePath . '/' . $path);
+                $sourceFile = new SplFileInfo($sourcePath . '/' . $path);
                 $targetParentPath = $targetDir . '/' . dirname($path);
 
                 if (!$filesystem->has($targetParentPath)) {
@@ -322,7 +322,7 @@ class RocareerPlugin extends Command
 
             // 3. 更新修改过的文件
             foreach ($changes['modified'] as $path) {
-                $sourceFile = new File($sourcePath . '/' . $path);
+                $sourceFile = new SplFileInfo($sourcePath . '/' . $path);
                 $targetParentPath = $targetDir . '/' . dirname($path);
 
                 $filesystem->putFileAs($targetDir, $sourceFile, $path);

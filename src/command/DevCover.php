@@ -46,7 +46,7 @@ class DevCover extends Command
 
         // 定义需要查找和替换的内容
         $contents = [
-            'use think\facade\Db;'=>'use support\think\Db;',
+            'use think\facade\Db;'=>'use support\orm\Db;',
             '): void' => ')',
             'namespace app\admin\controller' => 'namespace app\admin\controller',
             'use app\admin\model\AdminLog;' => 'use plugin\radmin\app\admin\model\AdminLog;',
@@ -111,7 +111,7 @@ class DevCover extends Command
             'use app\admin\library\\'=>'use plugin\radmin\app\admin\library\\',
             "=> public/npm-"=>"=> plugin/radmin/public/npm-",
             "=> 'plugin/radmin/plugin/radmin/public/npm-"=>"=> 'plugin/radmin/public/npm-",
-            "= radmin_config('think-orm"=>"= config('think-orm"
+            "= config('database'"=>"= config('think-orm"
 
 
 
