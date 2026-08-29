@@ -33,6 +33,7 @@ class AuditService
         'cross_copy' => ['title' => '跨包文件重复', 'description' => '不同包内容逐字节相同的 .php 文件 = 复制粘贴实现（应下沉共享，防接口漂移）'],
         'dto_contract' => ['title' => 'DTO 分层规范', 'description' => 'DTO 分层门禁：公开 API 控制器（非 admin）手拼多字段数组输出 = 契约未固化，应引入 app/<模块>/dto/ typed DTO 或 Model accessor；dto/ 目录内纯搬运类（toArray 原样返回入参、无整形/强转/脱敏）= 过度设计，直接用数组；目录命名用 dto 不用 data（data 与"数据/数据库"歧义）；文件标注 @audit-ignore dto_contract 显式豁免'],
         'llm_gate' => ['title' => '全域 LLM 门禁（智能体出口）', 'description' => '全域 LLM 业务必须经 agent 包 AgentGateway（无智能体不开工）：业务代码禁止直接实例化 AiRouterService 调用 LLM/向量化；ai（底层提供者）与 agent（网关）豁免；文件标注 @audit-ignore llm_gate 显式豁免（如 ai 调试/开放 API 运维接口）'],
+        'orm_migrated' => ['title' => 'ORM 迁移门禁（think-orm 残留）', 'description' => 'ORM 迁移门禁：src 内禁止 think-orm 类引用（think\facade\Db / think\db\exception / think\model\relation / think\Paginator / think\File / think\Exception）与 config(\'think-orm...\') 调用、composer 依赖 webman/think-orm；白名单保留 think-validate / think-helper / think-container 类；文件标注 @audit-ignore orm_migrated 显式豁免'],
     ];
 
     /** 问题明细入库/返回上限（完整数量在 count） */
@@ -1247,5 +1248,48 @@ class AuditService
             }
         }
         return $skip;
+    }
+
+    /* ---------- 14. ORM 迁移门禁（think-orm 残留反向扫描） ---------- */
+
+    protected function checkOrmMigrated(string $root, string $pkg, string $dir): ?array
+    {
+        if (!is_dir("$dir/src")) {
+            return null;
+        }
+        // think-orm 残留模式（白名单之外）；webman-dev 自身种子迁移/CLI 工具里历史文件
+        // 用 @audit-ignore orm_migrated 豁免
+        $forbidden = [
+            'think\\facade\\Db',
+            'think\\db\\exception',
+            'think\\model\\relation',
+            'think\\Paginator',
+            'use think\\File;',
+            'use think\\Exception;',
+            "config('think-orm",
+            'config("think-orm',
+        ];
+        $issues = [];
+        foreach ($this->phpFiles("$dir/src") as $f) {
+            $content = (string) file_get_contents($f);
+            if (str_contains($content, '@audit-ignore orm_migrated')) {
+                continue;
+            }
+            if (basename($f) === 'AuditService.php') {
+                continue; // 审计引擎自身的模式字面量自扫必误报
+            }
+            foreach ($forbidden as $pat) {
+                if (str_contains($content, $pat)) {
+                    $file = ltrim(str_replace("$dir/", '', $f), '/');
+                    $issues[] = "$file: " . str_replace('\\', '\\', $pat);
+                    break;
+                }
+            }
+        }
+        $composer = $dir . '/composer.json';
+        if (is_file($composer) && str_contains((string) file_get_contents($composer), 'webman/think-orm')) {
+            $issues[] = 'composer.json: webman/think-orm';
+        }
+        return ['issues' => $issues, 'note' => 'think-orm 残留清零'];
     }
 }
