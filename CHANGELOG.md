@@ -1,5 +1,18 @@
 # Changelog
 
+## [vv3.9.0] - 2026-12-06
+
+### 新增审计规则：ORM 迁移门禁（orm_migrated）
+
+- `rocareer:audit` 新增 `orm_migrated` 规则：src 内禁止 think-orm 类引用
+  （think\facade\Db / think\db\exception / think\model\relation / think\Paginator /
+  think\File / think\Exception）与 `config('think-orm...')` 调用、composer 依赖 webman/think-orm；
+  白名单保留 think-validate / think-helper / think-container 类；`@audit-ignore orm_migrated` 显式豁免
+- 幂等种子迁移 `20261206060000_radmin_webman_dev_audit_orm_migrated_rule.php`（后台规则列表同步）
+- RocareerPlugin `think\File` → `SplFileInfo`（think-orm 卸载适配）；DevCover 映射目标改
+  `support\orm\Db` 并标注豁免；18 包全量扫描 0 问题
+- 随 radmin v4.0.0 批次发版
+
 ## [v3.8.1] - 2026-12-06
 
 ### 修复：审计规则种子迁移排序（全 PG 迁移通道前置）
