@@ -18,7 +18,7 @@
 
 <script setup lang="ts">
 // 审计规则管理页（baTable CRUD，模板：agent/list + ai/channel）
-import { onMounted, provide, ref, useTemplateRef } from 'vue'
+import { onMounted, provide, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import PopupForm from './popupForm.vue'
 import { baTableApi } from '/@/api/common'
