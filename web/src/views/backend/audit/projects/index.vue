@@ -21,7 +21,7 @@
             :quick-search-placeholder="t('Quick search placeholder', { fields: '包名/项目名' })"
         >
             <el-button v-blur :loading="running" type="success" class="table-header-operate" @click="runAudit([])">
-                <Icon name="fa fa-search" />
+                <Icon color="#ffffff" name="fa fa-search" />
                 <span class="table-header-operate-text">运行全部审计</span>
             </el-button>
         </TableHeader>
@@ -251,5 +251,15 @@ onMounted(() => {
 }
 .table-row-delete {
     color: var(--el-color-danger) !important;
+}
+</style>
+<style scoped>
+/* 自定义表格头按钮：TableHeader 组件的 .mlr-12 + .el-button 为组件内 scoped 规则，
+ * 作用不到页面 slot 传入的按钮，需在页面侧补标准间距（参考 attachment/dataRecycleLog 先例） */
+.table-header-operate {
+    margin-left: 12px;
+}
+.table-header-operate-text {
+    margin-left: 6px;
 }
 </style>

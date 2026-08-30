@@ -1,5 +1,14 @@
 # Changelog
 
+## [v3.11.1] - 2026-08-30
+
+### 修复：审计项目页自定义表头按钮样式对齐 BuildAdmin 标准
+
+- `audit/projects` 表格头「运行全部审计」按钮：补页面 scoped 间距兜底（TableHeader
+  组件的 `.mlr-12 + .el-button` 为组件内 scoped 规则，作用不到页面 slot 传入的按钮，
+  需在页面侧补 `.table-header-operate { margin-left: 12px }`）；
+- 按钮 Icon 显式 `color="#ffffff"`（Icon 默认黑色，彩色按钮上不协调，对齐 crud/log 先例）。
+
 ## [v3.11.0] - 2026-08-30
 
 ### 事件规范增强：禁止 emit、一律 dispatch（不吞异常）
