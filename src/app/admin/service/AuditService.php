@@ -34,6 +34,7 @@ class AuditService
         'dto_contract' => ['title' => 'DTO 分层规范', 'description' => 'DTO 分层门禁：公开 API 控制器（非 admin）手拼多字段数组输出 = 契约未固化，应引入 app/<模块>/dto/ typed DTO 或 Model accessor；dto/ 目录内纯搬运类（toArray 原样返回入参、无整形/强转/脱敏）= 过度设计，直接用数组；目录命名用 dto 不用 data（data 与"数据/数据库"歧义）；文件标注 @audit-ignore dto_contract 显式豁免'],
         'llm_gate' => ['title' => '全域 LLM 门禁（智能体出口）', 'description' => '全域 LLM 业务必须经 agent 包 AgentGateway（无智能体不开工）：业务代码禁止直接实例化 AiRouterService 调用 LLM/向量化；ai（底层提供者）与 agent（网关）豁免；文件标注 @audit-ignore llm_gate 显式豁免（如 ai 调试/开放 API 运维接口）'],
         'orm_migrated' => ['title' => 'ORM 迁移门禁（think-orm 残留）', 'description' => 'ORM 迁移门禁：src 内禁止 think-orm 类引用（think\facade\Db / think\db\exception / think\model\relation / think\Paginator / think\File / think\Exception）与 config(\'think-orm...\') 调用、composer 依赖 webman/think-orm；白名单保留 think-validate / think-helper / think-container 类；文件标注 @audit-ignore orm_migrated 显式豁免'],
+        'event_standard' => ['title' => '事件规范（webman/event）', 'description' => 'webman/event 使用规范门禁（见 docs/webman-event-standard.md）：事件名必须 <提供方>.<领域>.<动作> 全小写点分（禁驼峰/连字符/下划线分隔/无前缀裸名）；业务代码禁止散落 Event::on()（监听器集中 config/plugin/*/event.php 或 config/event.php 声明，唯一例外 radmin EventRegister 内置 member.*）；静态 Event::emit 事件名应在本包/跨包/宿主有对应监听器（孤儿事件=发射即空转，纯日志应直写日志）；app/listener 监听器方法签名 (array $data): void + 自身 try/catch；文件标注 @audit-ignore event_standard 显式豁免'],
     ];
 
     /** 问题明细入库/返回上限（完整数量在 count） */
@@ -134,6 +135,7 @@ class AuditService
             'cross_copy' => 'no php files',
             'dto_contract' => 'no public api controllers',
             'llm_gate' => 'no src/app dir',
+            'event_standard' => 'no src/app dir',
         ];
         $packages = [];
         foreach ($pkgs as $name) {
@@ -1291,5 +1293,264 @@ class AuditService
             $issues[] = 'composer.json: webman/think-orm';
         }
         return ['issues' => $issues, 'note' => 'think-orm 残留清零'];
+    }
+
+    /* ---------- 15. 事件规范（webman/event） ---------- */
+
+    /**
+     * webman/event 使用规范门禁（依据 docs/webman-event-standard.md 沉淀规则）：
+     *   1. 事件名格式：Event::emit/Event::on 的静态事件名必须「提供方.领域.动作」
+     *      全小写点分（禁驼峰/连字符/下划线分隔/无前缀裸名）；
+     *   2. 业务代码禁止散落 Event::on()：监听器必须集中在 config/plugin/包名/event.php
+     *      或 config/event.php 声明（唯一例外：radmin support\member\EventRegister
+     *      内置化 member.* 生命周期事件，防宿主重复登记）；
+     *   3. 孤儿事件检测：静态 Event::emit 的事件名在「全工作区监听器注册表」中找不到
+     *      任何监听（本包 event.php / 跨包 event.php / radmin EventRegister / dev 宿主
+     *      config/event.php / 前缀通配 happ.message.* 均计入）= 发射即空转，
+     *      纯日志应直写日志（support\Log），否则标记；
+     *   4. 监听器方法签名：app/listener 下 on* 方法必须 (array $data): void。
+     * 豁免：文件标注 @audit-ignore event_standard 显式声明（如网关动态分发等）。
+     */
+    protected function checkEventStandard(string $root, string $pkg, string $dir): ?array
+    {
+        $appDir = "$dir/src/app";
+        if (!is_dir($appDir)) {
+            return null;
+        }
+        $issues = [];
+        $emitCount = 0;
+        $registry = $this->workspaceEventRegistry($root);
+        // happ 包：WS 网关提供方（businessworker 上下文），happ.* 为宿主消费的协议事件
+        // （dev/happ-host 注册 happ.auth / happ.message.*，业务应用按需订阅）——孤儿检测豁免
+        $skipOrphan = in_array($pkg, ['happ'], true);
+
+        // 1) 发射点扫描：命名格式 + 孤儿事件
+        foreach ($this->phpFiles($appDir) as $file) {
+            $rel = str_replace($root . '/', '', $file);
+            $src = (string) file_get_contents($file);
+            if (str_contains($src, '@audit-ignore event_standard')) {
+                continue;
+            }
+            $lines = file($file) ?: [];
+            foreach ($lines as $i => $line) {
+                $ln = $i + 1;
+                // 事件名提取：静态字面量 / 字面量前缀拼接（'happ.message.' . $type）
+                if (!preg_match("~Event::(?:emit|on)\(\s*(['\"])([^'\"]*)~", $line, $m)) {
+                    continue;
+                }
+                $name = $m[2];
+                // 跳过完全动态（无字面量前缀）
+                if ($name === '') {
+                    continue;
+                }
+                $emitCount++;
+                $isDynamic = substr_count($line, "' . ") > 0 || str_contains($line, '{$');
+                $base = $isDynamic ? $this->eventBase($name) : $name;
+
+                // 1a) 命名格式（仅字面量部分可判）
+                $formatIssues = $this->eventNameIssues($name);
+                if ($formatIssues !== '') {
+                    $issues[] = "$rel:$ln: 事件名 `$name` 不合规：$formatIssues";
+                }
+
+                // 1b) 孤儿事件：静态名或动态基础名在注册表无任何监听（发射即空转）
+                if (!$skipOrphan && $base !== '' && !$this->eventHasListener($registry, $base)) {
+                    $issues[] = "$rel:$ln: 事件 `$name` 在全工作区无任何监听器（发射即空转）——纯日志请直写日志，需扩展请先在 event.php 注册监听";
+                }
+            }
+        }
+
+        // 2) 业务代码散落 Event::on()（除 radmin EventRegister 内置 member.*）
+        $listenerDir = "$appDir/listener";
+        $scanOn = true;
+        if ($pkg === 'radmin') {
+            // radmin 仅允许 support\member\EventRegister 一处 Event::on（内置 member.*）
+            foreach ($this->phpFiles($appDir) as $file) {
+                $rel = str_replace($root . '/', '', $file);
+                if (str_contains($rel, '/support/member/EventRegister.php')) {
+                    continue;
+                }
+                $src = (string) file_get_contents($file);
+                if (str_contains($src, '@audit-ignore event_standard')) {
+                    continue;
+                }
+                foreach (file($file) ?: [] as $i => $line) {
+                    if (preg_match('~Event::on\s*\(~', $line)) {
+                        $issues[] = "$rel:" . ($i + 1) . ": 业务代码散落 Event::on()——监听器必须集中在 config/plugin/*/event.php（唯一例外 radmin EventRegister 内置 member.*）";
+                    }
+                }
+            }
+            $scanOn = false;
+        }
+
+        // 3) 监听器方法签名：(array $data): void
+        $listenerCount = 0;
+        if (is_dir($listenerDir)) {
+            foreach ($this->phpFiles($listenerDir) as $file) {
+                $listenerCount++;
+                $rel = str_replace($root . '/', '', $file);
+                $src = (string) file_get_contents($file);
+                if (str_contains($src, '@audit-ignore event_standard')) {
+                    continue;
+                }
+                foreach (file($file) ?: [] as $i => $line) {
+                    if (!preg_match('~function\s+(on[A-Za-z0-9_]+)\s*\(([^)]*)\)\s*(?::\s*([A-Za-z0-9_\\\?]+))?~', $line, $m)) {
+                        continue;
+                    }
+                    $method = $m[1];
+                    $params = trim($m[2]);
+                    $ret = trim($m[3] ?? '');
+                    $bad = [];
+                    if (!preg_match('~\barray\s+\$data\b~', $params)) {
+                        $bad[] = '参数应为 (array $data)';
+                    }
+                    if ($ret === '' || $ret === '?void') {
+                        $bad[] = '缺少返回类型 : void';
+                    } elseif ($ret !== 'void') {
+                        $bad[] = "返回类型应为 : void（当前 : $ret）";
+                    }
+                    if ($bad) {
+                        $issues[] = "$rel:" . ($i + 1) . ": 监听器 {$method}() " . implode('；', $bad);
+                    }
+                }
+            }
+        }
+
+        return ['issues' => $issues, 'note' => $emitCount . ' emits, ' . $listenerCount . ' listeners' . ($scanOn ? '' : ', radmin EventRegister 豁免')];
+    }
+
+    /** 动态事件名取基础段（去掉末段动态部分，如 'happ.message.' . $type -> happ.message） */
+    protected function eventBase(string $name): string
+    {
+        $name = rtrim($name, '.');
+        if (str_ends_with($name, '.')) {
+            $name = substr($name, 0, -1);
+        }
+        $pos = strrpos($name, '.');
+        return $pos === false ? $name : substr($name, 0, $pos);
+    }
+
+    /** 事件名格式问题（返回空串=合规）：<提供方>.<领域>.<动作> 全小写点分 */
+    protected function eventNameIssues(string $name): string
+    {
+        $problems = [];
+        if (preg_match('~[A-Z]~', $name)) {
+            $problems[] = '含大写（禁驼峰）';
+        }
+        if (str_contains($name, '-')) {
+            $problems[] = '含连字符';
+        }
+        if (preg_match('~_{2,}|^_|_$~', $name)) {
+            $problems[] = '下划线分隔（应用点分）';
+        }
+        if (!str_contains($name, '.')) {
+            $problems[] = '无提供方前缀（应为 <提供方>.<领域>.<动作>）';
+        }
+        // 结尾点号为动态拼接形态（'happ.message.' . $type），属网关白名单合法前缀，不算空段
+        if (preg_match('~(^\.|\.\.)~', $name)) {
+            $problems[] = '点号位置异常（空段/连续点）';
+        }
+        return implode('；', $problems);
+    }
+
+    /**
+     * 全工作区监听器注册表（src 各包 + dev 各宿主）
+     * 收集：config/plugin 下各包的 event.php 与 config/event.php 的数组键、
+     * EventRegister Event::on 事件名。
+     * 前缀通配（happ.message.* 等）单独收集用于动态事件匹配。
+     *
+     * @return array ['events' => 静态事件名集合, 'prefixes' => 通配前缀集合]
+     */
+    protected function workspaceEventRegistry(string $root): array
+    {
+        if (isset(static::$rootScanCache[$root . ':events'])) {
+            return static::$rootScanCache[$root . ':events'];
+        }
+        $events = [];
+        $prefixes = [];
+        $scanDir = function (string $base) use (&$events, &$prefixes): void {
+            foreach (glob("$base/*/config/event.php") ?: [] as $f) {
+                $this->collectEventNames($f, $events, $prefixes);
+            }
+            foreach (glob("$base/*/config/plugin/*/*/event.php") ?: [] as $f) {
+                $this->collectEventNames($f, $events, $prefixes);
+            }
+            foreach (glob("$base/*/src/support/**/EventRegister.php") ?: [] as $f) {
+                $this->collectEventOnNames($f, $events);
+            }
+        };
+        $scanDir($root);
+        // dev 宿主（root 的上一级/dev）
+        $devRoot = dirname(rtrim($root, '/')) . '/dev';
+        if (is_dir($devRoot)) {
+            $scanDir($devRoot);
+        }
+        return static::$rootScanCache[$root . ':events'] = ['events' => $events, 'prefixes' => $prefixes];
+    }
+
+    /** 从 event.php 数组键收集事件名（含 $listeners['x'] = 动态赋值形态） */
+    protected function collectEventNames(string $file, array &$events, array &$prefixes): void
+    {
+        $src = (string) file_get_contents($file);
+        // 键形态1：'xxx.yyy' => [（return 数组 / $listeners['x'] =）
+        if (preg_match_all("~['\"]([a-z][a-z0-9_.]*(?:\.[a-z][a-z0-9_.]*)?)['\"]\s*=>~i", $src, $m)) {
+            foreach ($m[1] as $name) {
+                $this->addEventName($name, $events, $prefixes);
+            }
+        }
+        // 键形态2：$listeners['xxx.yyy'] = [
+        if (preg_match_all("~\$listeners\s*\[\s*['\"]([a-z][a-z0-9_.]*)['\"]\s*\]~i", $src, $m2)) {
+            foreach ($m2[1] as $name) {
+                $this->addEventName($name, $events, $prefixes);
+            }
+        }
+        // 键形态3：Event::on('xxx.yyy', ...)
+        $this->collectEventOnNames($file, $events);
+    }
+
+    protected function addEventName(string $name, array &$events, array &$prefixes): void
+    {
+        if (str_ends_with($name, '.*')) {
+            $prefixes[rtrim($name, '*')] = true;
+            return;
+        }
+        $events[$name] = true;
+    }
+
+    /** 从文件收集 Event::on('xxx.yyy', ...) 静态注册（radmin EventRegister 等） */
+    protected function collectEventOnNames(string $file, array &$events): void
+    {
+        $src = (string) file_get_contents($file);
+        if (preg_match_all("~Event::on\s*\(\s*(['\"])([^'\"]+)~", $src, $m)) {
+            foreach ($m[2] as $name) {
+                $events[$name] = true;
+            }
+        }
+    }
+
+    /** 事件名是否有监听（静态名精确命中 / 动态名基础命中通配或精确） */
+    protected function eventHasListener(array $registry, string $name): bool
+    {
+        if (isset($registry['events'][$name])) {
+            return true;
+        }
+        foreach ($registry['prefixes'] as $prefix) {
+            if (str_starts_with($name, $prefix)) {
+                return true;
+            }
+        }
+        // 动态基础名（happ.message）再向上取一段尝试命中（happ.* 之类）
+        if (str_contains($name, '.')) {
+            $upper = substr($name, 0, strrpos($name, '.'));
+            if (isset($registry['events'][$upper])) {
+                return true;
+            }
+            foreach ($registry['prefixes'] as $prefix) {
+                if (str_starts_with($upper, $prefix)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

@@ -1,5 +1,24 @@
 # Changelog
 
+## [v3.10.0] - 2026-08-30
+
+### 新增审计规则：事件规范（event_standard）
+
+- `rocareer:audit` 新增 `event_standard` 规则：webman/event 使用规范门禁
+  （依据 `docs/webman-event-standard.md` 沉淀规则）：
+  - 事件名格式：`Event::emit/on` 事件名必须「提供方.领域.动作」全小写点分
+    （禁驼峰/连字符/下划线分隔/无前缀裸名）；
+  - 业务代码禁止散落 `Event::on()`（监听器集中 `config/plugin/*/event.php` 或
+    `config/event.php` 声明，唯一例外 radmin `EventRegister` 内置 member.*）；
+  - 孤儿事件检测：静态 `Event::emit` 事件名在全工作区监听器注册表
+    （本包/跨包 event.php、radmin EventRegister、dev 宿主 config/event.php、
+    前缀通配如 happ.message.* 均计入）中无任何监听 = 发射即空转，报出并提示
+    纯日志直写日志；
+  - 监听器方法签名：`app/listener` 下 `on*` 方法必须 `(array $data): void`；
+  - 文件标注 `@audit-ignore event_standard` 显式豁免。
+- 幂等种子迁移 `20261230000000_radmin_webman_dev_audit_event_standard_rule.php`
+  （后台规则列表同步）。
+
 ## [Unreleased] - 
 
 ### 清理

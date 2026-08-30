@@ -51,7 +51,7 @@ class AuditCollection implements McpToolCollectionInterface
                     'properties' => [
                         'root' => ['type' => 'string', 'description' => '包目录根（含 radmin 等包目录；缺省自动探测）'],
                         'pkg' => ['type' => 'string', 'description' => '仅审计单个包（缺省全部默认包）'],
-                        'codes' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => '规则子集（缺省全部）：php_syntax/controller/permission/migration/residue/version/web_page/async_blocking/fqcn_dup/superglobal/dead_code/cross_copy/dto_contract/llm_gate'],
+                        'codes' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => '规则子集（缺省全部）：php_syntax/controller/permission/migration/residue/version/web_page/async_blocking/fqcn_dup/superglobal/dead_code/cross_copy/dto_contract/llm_gate/orm_migrated/event_standard'],
                         'detail' => ['type' => 'boolean', 'description' => '是否附带问题明细（缺省 false）'],
                     ],
                 ],
