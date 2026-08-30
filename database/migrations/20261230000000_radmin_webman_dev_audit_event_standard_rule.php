@@ -4,11 +4,13 @@
  *
  * 新增 1 条规则（code 与 AuditService::RULES 内置规则一致）：
  * - event_standard：webman/event 使用规范门禁（见 docs/webman-event-standard.md）——
- *   事件名必须「提供方.领域.动作」全小写点分（禁驼峰/连字符/下划线分隔/无前缀裸名）；
- *   业务代码禁止散落 Event::on()（监听器集中 config/plugin/包名/event.php 或 config/event.php
- *   声明，唯一例外 radmin EventRegister 内置 member.*）；静态 Event::emit 事件名应在本包/
- *   跨包/宿主有对应监听器（孤儿事件=发射即空转，纯日志应直写日志）；app/listener 监听器
- *   方法签名 (array $data): void + 自身 try/catch；文件标注 @audit-ignore event_standard
+ *   事件发射一律用 Event::dispatch（不吞异常，监听器异常上抛），禁止 Event::emit
+ *   （吞异常掩盖监听器故障）；事件名必须「提供方.领域.动作」全小写点分
+ *   （禁驼峰/连字符/下划线分隔/无前缀裸名）；业务代码禁止散落 Event::on()
+ *   （监听器集中 config/plugin/包名/event.php 或 config/event.php 声明，唯一例外
+ *   radmin EventRegister 内置 member.*）；静态事件名应在本包/跨包/宿主有对应
+ *   监听器（孤儿事件=发射即空转，纯日志应直写日志）；app/listener 监听器方法
+ *   签名 (array $data): void + 自身 try/catch；文件标注 @audit-ignore event_standard
  *   显式豁免。
  *
  * 幂等：按 name 去重插入 radmin_dev_audit_rule；重复执行安全。
@@ -30,7 +32,7 @@ class RadminWebmanDevAuditEventStandardRule extends AbstractMigration
                 [
                     'name' => 'event_standard',
                     'title' => '事件规范（webman/event）',
-                    'description' => 'webman/event 使用规范门禁（见 docs/webman-event-standard.md）：事件名必须 <提供方>.<领域>.<动作> 全小写点分（禁驼峰/连字符/下划线分隔/无前缀裸名）；业务代码禁止散落 Event::on()（监听器集中 config/plugin/*/event.php 或 config/event.php 声明，唯一例外 radmin EventRegister 内置 member.*）；静态 Event::emit 事件名应在本包/跨包/宿主有对应监听器（孤儿事件=发射即空转，纯日志应直写日志）；app/listener 监听器方法签名 (array $data): void + 自身 try/catch；文件标注 @audit-ignore event_standard 显式豁免',
+                    'description' => 'webman/event 使用规范门禁（见 docs/webman-event-standard.md）：事件发射一律用 Event::dispatch（不吞异常，监听器异常上抛），禁止 Event::emit（吞异常掩盖监听器故障）；事件名必须 <提供方>.<领域>.<动作> 全小写点分（禁驼峰/连字符/下划线分隔/无前缀裸名）；业务代码禁止散落 Event::on()（监听器集中 config/plugin/*/event.php 或 config/event.php 声明，唯一例外 radmin EventRegister 内置 member.*）；静态事件名应在本包/跨包/宿主有对应监听器（孤儿事件=发射即空转，纯日志应直写日志）；app/listener 监听器方法签名 (array $data): void + 自身 try/catch；文件标注 @audit-ignore event_standard 显式豁免',
                     'status' => 'enabled',
                     'weigh' => 95,
                     'remark' => '',

@@ -34,7 +34,7 @@ class AuditService
         'dto_contract' => ['title' => 'DTO 分层规范', 'description' => 'DTO 分层门禁：公开 API 控制器（非 admin）手拼多字段数组输出 = 契约未固化，应引入 app/<模块>/dto/ typed DTO 或 Model accessor；dto/ 目录内纯搬运类（toArray 原样返回入参、无整形/强转/脱敏）= 过度设计，直接用数组；目录命名用 dto 不用 data（data 与"数据/数据库"歧义）；文件标注 @audit-ignore dto_contract 显式豁免'],
         'llm_gate' => ['title' => '全域 LLM 门禁（智能体出口）', 'description' => '全域 LLM 业务必须经 agent 包 AgentGateway（无智能体不开工）：业务代码禁止直接实例化 AiRouterService 调用 LLM/向量化；ai（底层提供者）与 agent（网关）豁免；文件标注 @audit-ignore llm_gate 显式豁免（如 ai 调试/开放 API 运维接口）'],
         'orm_migrated' => ['title' => 'ORM 迁移门禁（think-orm 残留）', 'description' => 'ORM 迁移门禁：src 内禁止 think-orm 类引用（think\facade\Db / think\db\exception / think\model\relation / think\Paginator / think\File / think\Exception）与 config(\'think-orm...\') 调用、composer 依赖 webman/think-orm；白名单保留 think-validate / think-helper / think-container 类；文件标注 @audit-ignore orm_migrated 显式豁免'],
-        'event_standard' => ['title' => '事件规范（webman/event）', 'description' => 'webman/event 使用规范门禁（见 docs/webman-event-standard.md）：事件名必须 <提供方>.<领域>.<动作> 全小写点分（禁驼峰/连字符/下划线分隔/无前缀裸名）；业务代码禁止散落 Event::on()（监听器集中 config/plugin/*/event.php 或 config/event.php 声明，唯一例外 radmin EventRegister 内置 member.*）；静态 Event::emit 事件名应在本包/跨包/宿主有对应监听器（孤儿事件=发射即空转，纯日志应直写日志）；app/listener 监听器方法签名 (array $data): void + 自身 try/catch；文件标注 @audit-ignore event_standard 显式豁免'],
+        'event_standard' => ['title' => '事件规范（webman/event）', 'description' => 'webman/event 使用规范门禁（见 docs/webman-event-standard.md）：事件发射一律用 Event::dispatch（不吞异常，监听器异常上抛），禁止 Event::emit（吞异常掩盖监听器故障）；事件名必须 <提供方>.<领域>.<动作> 全小写点分（禁驼峰/连字符/下划线分隔/无前缀裸名）；业务代码禁止散落 Event::on()（监听器集中 config/plugin/*/event.php 或 config/event.php 声明，唯一例外 radmin EventRegister 内置 member.*）；静态事件名应在本包/跨包/宿主有对应监听器（孤儿事件=发射即空转，纯日志应直写日志）；app/listener 监听器方法签名 (array $data): void + 自身 try/catch；文件标注 @audit-ignore event_standard 显式豁免'],
     ];
 
     /** 问题明细入库/返回上限（完整数量在 count） */
@@ -1299,16 +1299,18 @@ class AuditService
 
     /**
      * webman/event 使用规范门禁（依据 docs/webman-event-standard.md 沉淀规则）：
-     *   1. 事件名格式：Event::emit/Event::on 的静态事件名必须「提供方.领域.动作」
+     *   1. 事件发射一律用 Event::dispatch（不吞异常）：禁止 Event::emit（吞异常，
+     *      监听器异常被 catch 后仅记日志，掩盖故障）；
+     *   2. 事件名格式：Event::dispatch/Event::on 的静态事件名必须「提供方.领域.动作」
      *      全小写点分（禁驼峰/连字符/下划线分隔/无前缀裸名）；
-     *   2. 业务代码禁止散落 Event::on()：监听器必须集中在 config/plugin/包名/event.php
+     *   3. 业务代码禁止散落 Event::on()：监听器必须集中在 config/plugin/包名/event.php
      *      或 config/event.php 声明（唯一例外：radmin support\member\EventRegister
      *      内置化 member.* 生命周期事件，防宿主重复登记）；
-     *   3. 孤儿事件检测：静态 Event::emit 的事件名在「全工作区监听器注册表」中找不到
+     *   4. 孤儿事件检测：静态事件名在「全工作区监听器注册表」中找不到
      *      任何监听（本包 event.php / 跨包 event.php / radmin EventRegister / dev 宿主
      *      config/event.php / 前缀通配 happ.message.* 均计入）= 发射即空转，
      *      纯日志应直写日志（support\Log），否则标记；
-     *   4. 监听器方法签名：app/listener 下 on* 方法必须 (array $data): void。
+     *   5. 监听器方法签名：app/listener 下 on* 方法必须 (array $data): void。
      * 豁免：文件标注 @audit-ignore event_standard 显式声明（如网关动态分发等）。
      */
     protected function checkEventStandard(string $root, string $pkg, string $dir): ?array
@@ -1334,8 +1336,18 @@ class AuditService
             $lines = file($file) ?: [];
             foreach ($lines as $i => $line) {
                 $ln = $i + 1;
+                $t = ltrim($line);
+                // 跳过注释/空行（//、*、/* 开头的文档与注释内不应被当作发射点）
+                if ($t === '' || str_starts_with($t, '//') || str_starts_with($t, '*') || str_starts_with($t, '/*')) {
+                    continue;
+                }
+                // 1a) 禁止 emit（吞异常）：一律 Event::dispatch
+                if (preg_match('~Event::emit\s*\(~', $line)) {
+                    $issues[] = "$rel:$ln: 使用了 Event::emit（吞异常，监听器故障被掩盖）——事件发射一律用 Event::dispatch";
+                    continue;
+                }
                 // 事件名提取：静态字面量 / 字面量前缀拼接（'happ.message.' . $type）
-                if (!preg_match("~Event::(?:emit|on)\(\s*(['\"])([^'\"]*)~", $line, $m)) {
+                if (!preg_match("~Event::(?:dispatch|on)\(\s*(['\"])([^'\"]*)~", $line, $m)) {
                     continue;
                 }
                 $name = $m[2];
@@ -1375,6 +1387,10 @@ class AuditService
                     continue;
                 }
                 foreach (file($file) ?: [] as $i => $line) {
+                    $t = ltrim($line);
+                    if ($t === '' || str_starts_with($t, '//') || str_starts_with($t, '*') || str_starts_with($t, '/*')) {
+                        continue;
+                    }
                     if (preg_match('~Event::on\s*\(~', $line)) {
                         $issues[] = "$rel:" . ($i + 1) . ": 业务代码散落 Event::on()——监听器必须集中在 config/plugin/*/event.php（唯一例外 radmin EventRegister 内置 member.*）";
                     }

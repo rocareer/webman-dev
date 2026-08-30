@@ -1,5 +1,14 @@
 # Changelog
 
+## [v3.11.0] - 2026-08-30
+
+### 事件规范增强：禁止 emit、一律 dispatch（不吞异常）
+
+- `event_standard` 规则新增「禁止 `Event::emit`」检查：emit 吞监听器异常掩盖故障，
+  一律用 `Event::dispatch`（异常上抛、监听器 Bug 可见）；事件名提取正则兼容 dispatch；
+- 发射点/散落 `Event::on()` 扫描跳过注释行（修复注释掉的 `Event::dispatch` 误报）；
+- 规则描述同步 dispatch 优先语义；迁移种子 `20261230000000` 描述文本同步。
+
 ## [v3.10.0] - 2026-08-30
 
 ### 新增审计规则：事件规范（event_standard）
