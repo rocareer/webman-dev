@@ -1,5 +1,14 @@
 # Changelog
 
+## [v3.11.6] - 2026-08-31
+
+### 修复：orm_migrated 审计扫描扩展至 database/ 迁移目录
+
+- AuditService 的 `orm_migrated` 规则扫描范围从 `src/` 扩展到 `src/ + database/`
+  （迁移同样禁 think 语义残留，2026-08-31 曾漏 version202 的 Db::startTrans）。
+
+
+
 ## [v3.11.5] - 2026-08-31
 
 ### 修复：关键字搜索收敛到 radmin 全局 keyword_like()

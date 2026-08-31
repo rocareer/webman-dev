@@ -1319,30 +1319,34 @@ class AuditService
             '/->where\([^,]+,[^,]+,\s*[\'"](in|not in|between|not between|null|not null|find in set)[\'"]\s*,/i' => 'where 三参数操作符（in/between/null/find in set，应改 whereIn/whereBetween/whereNull/whereRaw）',
         ];
         $issues = [];
-        foreach ($this->phpFiles("$dir/src") as $f) {
-            $content = (string) file_get_contents($f);
-            if (str_contains($content, '@audit-ignore orm_migrated')) {
-                continue;
-            }
-            if (basename($f) === 'AuditService.php') {
-                continue; // 审计引擎自身的模式字面量自扫必误报
-            }
-            $file = ltrim(str_replace("$dir/", '', $f), '/');
-            $hit  = false;
-            foreach ($forbidden as $pat) {
-                if (str_contains($content, $pat)) {
-                    $issues[] = "$file: " . str_replace('\\', '\\', $pat);
-                    $hit = true;
-                    break;
+        // 扫描 src/ 业务代码 + database/ 迁移（迁移同样禁 think 语义残留，2026-08-31 曾漏 version202 的 Db::startTrans）
+        $scanDirs = array_filter([$dir . '/src', $dir . '/database'], 'is_dir');
+        foreach ($scanDirs as $scanDir) {
+            foreach ($this->phpFiles($scanDir) as $f) {
+                $content = (string) file_get_contents($f);
+                if (str_contains($content, '@audit-ignore orm_migrated')) {
+                    continue;
                 }
-            }
-            if ($hit) {
-                continue; // 已命中禁用模式，不再重复报告行级残留
-            }
-            foreach ($lineForbidden as $pattern => $label) {
-                if (preg_match($pattern, $content)) {
-                    $issues[] = "$file: $label";
-                    break;
+                if (basename($f) === 'AuditService.php') {
+                    continue; // 审计引擎自身的模式字面量自扫必误报
+                }
+                $file = ltrim(str_replace("$dir/", '', $f), '/');
+                $hit  = false;
+                foreach ($forbidden as $pat) {
+                    if (str_contains($content, $pat)) {
+                        $issues[] = "$file: " . str_replace('\\', '\\', $pat);
+                        $hit = true;
+                        break;
+                    }
+                }
+                if ($hit) {
+                    continue; // 已命中禁用模式，不再重复报告行级残留
+                }
+                foreach ($lineForbidden as $pattern => $label) {
+                    if (preg_match($pattern, $content)) {
+                        $issues[] = "$file: $label";
+                        break;
+                    }
                 }
             }
         }
