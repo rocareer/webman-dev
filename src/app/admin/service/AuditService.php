@@ -1268,6 +1268,8 @@ class AuditService
             'think\\Paginator',
             'use think\\File;',
             'use think\\Exception;',
+            // support\think\* 门面（webman/think-orm 专属路径，Eloquent 下类不存在）
+            'support\\think\\',
             "config('think-orm",
             'config("think-orm',
             // think 查询语义残留（v4.0.0 收敛后禁止回退）
@@ -1281,7 +1283,13 @@ class AuditService
             'Db::query(',
             'Db::execute(',
             '->getQuery()->getTableFields(',
+            '->getTableFields(',
             '->getData(',
+            '->cache(',
+            '->inc(',
+            '->dec(',
+            '->setInc(',
+            '->setDec(',
             'onBeforeInsert',
             'onBeforeUpdate',
             'onAfterInsert',
@@ -1290,6 +1298,10 @@ class AuditService
             'protected $autoWriteTimestamp',
             'protected $createTime',
             'protected $updateTime',
+            'protected $dateFormat = false',
+            'ensureThinkOrmPgConnection',
+            'DataNotFoundException',
+            'ThinkModel',
         ];
         // 行级语义残留（正则精确匹配，避免误报 Eloquent 原生 API 与控制器方法调用）
         $lineForbidden = [
@@ -1303,6 +1315,8 @@ class AuditService
             '/function (get|set)[A-Za-z0-9_]+Attr\(/' => 'getXxxAttr/setXxxAttr 访问器（应改 getXxxAttribute）',
             '/protected \$type\s*=\s*\[/' => '模型 $type（应改 $casts）',
             '/protected \$name\s*=\s*[\'"]/' => '模型 $name（应改 $table）',
+            // think 三参数操作符形态（Eloquent 静默翻成 "col" = 'in'，数组值丢失只失效不报错）
+            '/->where\([^,]+,[^,]+,\s*[\'"](in|not in|between|not between|null|not null|find in set)[\'"]\s*,/i' => 'where 三参数操作符（in/between/null/find in set，应改 whereIn/whereBetween/whereNull/whereRaw）',
         ];
         $issues = [];
         foreach ($this->phpFiles("$dir/src") as $f) {

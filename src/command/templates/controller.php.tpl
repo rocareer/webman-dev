@@ -38,11 +38,11 @@ class {{UC}} extends Backend
         $page = max(1, (int) $this->request->input('page', 1));
         $keyword = (string) $this->request->input('keyword', $this->request->input('quickSearch', ''));
 
-        $query = $this->model->order('id', 'desc');
+        $query = $this->model->orderBy('id', 'desc');
         if ($keyword !== '') {
-            $query = $query->whereLike('name', '%' . $keyword . '%');
+            $query = $query->where('name', 'like', '%' . $keyword . '%');
         }
-        $paginator = $query->paginate(['list_rows' => $limit, 'page' => $page]);
+        $paginator = $query->paginate($limit, ['*'], 'page', $page);
 
         return $this->success('', [
             'list' => $paginator->items(),

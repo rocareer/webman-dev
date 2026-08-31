@@ -56,9 +56,7 @@ class AuditResult extends Backend
         }
         $keyword = (string) $this->request->input('quickSearch', '');
         if ($keyword !== '') {
-            $query = $query->where(function ($q) use ($keyword) {
-                $q->where('project_name', 'like', '%' . $keyword . '%')->orWhere('rule_title', 'like', '%' . $keyword . '%');
-            });
+            $query = keyword_like($query, ['project_name', 'rule_title'], $keyword);
         }
         $limit = clamp_limit((int) $this->request->input('limit', 10));
         $page = clamp_page((int) $this->request->input('page', 1));

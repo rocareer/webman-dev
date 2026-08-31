@@ -1,5 +1,11 @@
 # Changelog
 
+## [v3.11.5] - 2026-08-31
+
+### 修复：关键字搜索收敛到 radmin 全局 keyword_like()
+
+- AuditResult 1 处手写 where 闭包样板；多字段 like 搜索统一走 keyword_like($query, [$fields], $keyword)，禁止手写 where 闭包样板。
+
 ## [v3.11.4] - 2026-08-31
 
 ### 修复：JSON 编码收敛到 radmin 全局 json_unicode()
