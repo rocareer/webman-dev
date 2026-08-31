@@ -36,6 +36,7 @@ class AuditService
         'orm_migrated' => ['title' => 'ORM 迁移门禁（think-orm 残留）', 'description' => 'ORM 迁移门禁：src 内禁止 think-orm 类引用（think\facade\Db / think\db\exception / think\model\relation / think\Paginator / think\File / think\Exception）与 config(\'think-orm...\') 调用、composer 依赖 webman/think-orm；白名单保留 think-validate / think-helper / think-container 类；文件标注 @audit-ignore orm_migrated 显式豁免'],
         'event_standard' => ['title' => '事件规范（webman/event）', 'description' => 'webman/event 使用规范门禁（见 docs/webman-event-standard.md）：事件发射一律用 Event::dispatch（不吞异常，监听器异常上抛），禁止 Event::emit（吞异常掩盖监听器故障）；事件名必须 <提供方>.<领域>.<动作> 全小写点分（禁驼峰/连字符/下划线分隔/无前缀裸名）；业务代码禁止散落 Event::on()（监听器集中 config/plugin/*/event.php 或 config/event.php 声明，唯一例外 radmin EventRegister 内置 member.*）；静态事件名应在本包/跨包/宿主有对应监听器（孤儿事件=发射即空转，纯日志应直写日志）；app/listener 监听器方法签名 (array $data): void + 自身 try/catch；文件标注 @audit-ignore event_standard 显式豁免'],
         'common_utils' => ['title' => '通用工具真源门禁（禁止重复造轮子）', 'description' => '通用工具真源门禁（见 docs/common-utils-registry.md）：已知手写重复模式必须用 radmin 全局函数——max(1, min(100 → clamp_limit、分页 max(1, (int) → clamp_page、keyword/quickSearch 兼容链 → request_keyword、where 闭包多字段 like → keyword_like、json_encode(UNICODE|SLASHES) → json_unicode、strtr(base64_encode → base64url_encode、md5(uniqid → uuid7、固定四星掩码 → mask_secret；真源定义文件（radmin functions.php）与审计引擎自身源文件豁免；文件标注 @audit-ignore common_utils 显式豁免'],
+        'install_standard' => ['title' => 'Install.php 标准化', 'description' => 'Install.php 标准化门禁（见 docs/install-standard.md）：WEBMAN_PLUGIN 常量、install/update/uninstall 三钩子齐全、install 签名兼容官方 Install::install(true)（禁强类型参数）、禁官方骨架残留 copy_dir/remove_dir（显式 overwrite=true 的 copy_dir 除外）与 array() 语法、类前中文头注释；文件标注 @audit-ignore install_standard 显式豁免'],
     ];
 
     /** 问题明细入库/返回上限（完整数量在 count） */
@@ -138,6 +139,7 @@ class AuditService
             'llm_gate' => 'no src/app dir',
             'event_standard' => 'no src/app dir',
             'common_utils' => 'no src dir',
+            'install_standard' => 'no src/Install.php',
         ];
         $packages = [];
         foreach ($pkgs as $name) {
@@ -1733,5 +1735,75 @@ class AuditService
             }
         }
         return ['issues' => $issues, 'note' => 'src scanned（真源豁免：radmin functions.php）'];
+    }
+
+    /* ---------- 17. Install.php 标准化（docs/install-standard.md） ---------- */
+
+    /**
+     * Install.php 标准化门禁（依据 docs/install-standard.md 沉淀规则）：
+     *   1. const WEBMAN_PLUGIN = true 必须存在（webman 基础插件声明）；
+     *   2. 三钩子齐全：install/update/uninstall 方法都必须存在
+     *      （缺 update：官方 Plugin::update 回退 install(false)，升级专属动作无处安放）；
+     *   3. install 签名必须兼容官方机制调用 Install::install(true)：
+     *      禁止强类型参数（string/int/bool 等）——官方传 bool，强类型会 TypeError
+     *      （channel v1.0.0 曾因此宿主 start.php 从未被注入）；
+     *   4. 禁止官方骨架残留语法：copy_dir(/remove_dir(（webman-status-code/webman-dev 曾残留；
+     *      copy_dir 显式带 overwrite=true 的属有意全量刷新语义，放行，如 webman-migration）、
+     *      array( 数组语法（PHP 8.1 应 []）；
+     *   5. 类前必须有中文头注释块（/** 开头，职责/安装步骤/卸载说明）。
+     * 豁免：文件标注 @audit-ignore install_standard 显式声明。
+     */
+    protected function checkInstallStandard(string $root, string $pkg, string $dir): ?array
+    {
+        $file = "$dir/src/Install.php";
+        if (!is_file($file)) {
+            return null;
+        }
+        $src = (string) file_get_contents($file);
+        if (str_contains($src, '@audit-ignore install_standard')) {
+            return ['issues' => [], 'note' => '豁免（@audit-ignore install_standard）'];
+        }
+        $rel = ltrim(str_replace("$dir/", '', $file), '/');
+        $issues = [];
+
+        // 1) WEBMAN_PLUGIN 常量
+        if (!preg_match('/const\s+WEBMAN_PLUGIN\s*=\s*true/i', $src)) {
+            $issues[] = "$rel: 缺少 const WEBMAN_PLUGIN = true（webman 基础插件声明）";
+        }
+
+        // 2) 三钩子齐全
+        foreach (['install', 'update', 'uninstall'] as $hook) {
+            if (!preg_match('/function\s+' . $hook . '\s*\(/i', $src)) {
+                $issues[] = "$rel: 缺少 {$hook}() 钩子（docs/install-standard.md：install/update/uninstall 三钩子必须齐全）";
+            }
+        }
+
+        // 3) install 签名兼容官方（禁止强类型参数）
+        if (preg_match('/function\s+install\s*\(\s*(?:string|int|float|bool|array|object)\s+\$/', $src)) {
+            $issues[] = "$rel: install() 参数为强类型（官方机制调用 Install::install(true) 会 TypeError，应改为 install(\$isFirst = true)）";
+        }
+
+        // 4) 官方骨架残留语法（排除注释行；copy_dir 显式 overwrite=true 属有意刷新语义放行）
+        foreach (file($file) ?: [] as $i => $line) {
+            $t = ltrim($line);
+            if ($t === '' || str_starts_with($t, '//') || str_starts_with($t, '*') || str_starts_with($t, '/*')) {
+                continue;
+            }
+            $ln = $i + 1;
+            if (preg_match('/\bcopy_dir\s*\(/', $line) && !preg_match('/,\s*true\s*\)/', $line)) {
+                $issues[] = "$rel:$ln: 使用官方骨架 copy_dir()（默认不覆盖，升级配置不刷新；应自实现 installByRelation(bool \$isFirst) 或显式 overwrite=true）";
+            } elseif (preg_match('/\bremove_dir\s*\(/', $line)) {
+                $issues[] = "$rel:$ln: 使用官方骨架 remove_dir()（应自实现 uninstallByRelation()）";
+            } elseif (preg_match('/\barray\s*\(/', $line)) {
+                $issues[] = "$rel:$ln: 使用 array() 数组语法（PHP 8.1 应使用 []）";
+            }
+        }
+
+        // 5) 类前中文头注释
+        if (!preg_match('~/\*\*[\s\S]*?class\s+Install\b~', $src)) {
+            $issues[] = "$rel: 类前缺少中文头注释（职责/安装步骤/卸载说明，照抄 radmin/ai 先例）";
+        }
+
+        return ['issues' => $issues, 'note' => 'Install.php 已检查'];
     }
 }

@@ -1,5 +1,18 @@
 # Changelog
 
+## [v3.13.0] - 2026-08-31
+
+### 新增：rocareer:audit install_standard 规则 + Install.php 标准化
+
+- 新增 `install_standard` 审计规则（Install.php 标准化门禁，依据 docs/install-standard.md）：
+  WEBMAN_PLUGIN 常量 / install/update/uninstall 三钩子齐全 / install 签名兼容官方
+  Install::install(true)（禁强类型参数）/ 禁官方骨架残留 copy_dir/remove_dir（显式
+  overwrite=true 放行）与 array() 语法 / 类前中文头注释；`@audit-ignore install_standard`
+  显式豁免；MCP quality_audit 工具 codes 列表同步。
+- Install.php 标准化：补 update() 钩子、install($isFirst = true) 签名、自实现
+  installByRelation(bool $isFirst)/uninstallByRelation()（去 copy_dir/remove_dir 骨架残留；
+  更新仅补齐缺失项，保留宿主 audit_root 用户配置）。
+
 ## [v3.12.1] - 2026-08-31
 
 ### 优化：php -l 语法检查并行化（全量审计 49s → 8.6s）
