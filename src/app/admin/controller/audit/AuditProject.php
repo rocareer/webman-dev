@@ -215,7 +215,7 @@ class AuditProject extends Backend
                 $row->rule_title = (string) $rule['title'];
                 $row->is_pass = $rule['pass'] ? DevAuditResult::PASS_YES : DevAuditResult::PASS_NO;
                 $row->issue_count = (int) $rule['count'];
-                $row->detail = json_encode($rule['issues'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                $row->detail = json_unicode($rule['issues']);
                 $row->run_at = $now;
                 $row->create_time = $now;
                 $row->save();

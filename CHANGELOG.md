@@ -1,5 +1,11 @@
 # Changelog
 
+## [v3.11.4] - 2026-08-31
+
+### 修复：JSON 编码收敛到 radmin 全局 json_unicode()
+
+- json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) 手写组合 → json_unicode()（AuditProject 1 处）；统一默认 flag，禁止手写组合。
+
 ## [v3.11.3] - 2026-08-31
 
 ### 修复：audit async_blocking 规则文案与豁免同步自研 Fiber 收敛
