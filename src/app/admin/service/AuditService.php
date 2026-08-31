@@ -35,6 +35,7 @@ class AuditService
         'llm_gate' => ['title' => '全域 LLM 门禁（智能体出口）', 'description' => '全域 LLM 业务必须经 agent 包 AgentGateway（无智能体不开工）：业务代码禁止直接实例化 AiRouterService 调用 LLM/向量化；ai（底层提供者）与 agent（网关）豁免；文件标注 @audit-ignore llm_gate 显式豁免（如 ai 调试/开放 API 运维接口）'],
         'orm_migrated' => ['title' => 'ORM 迁移门禁（think-orm 残留）', 'description' => 'ORM 迁移门禁：src 内禁止 think-orm 类引用（think\facade\Db / think\db\exception / think\model\relation / think\Paginator / think\File / think\Exception）与 config(\'think-orm...\') 调用、composer 依赖 webman/think-orm；白名单保留 think-validate / think-helper / think-container 类；文件标注 @audit-ignore orm_migrated 显式豁免'],
         'event_standard' => ['title' => '事件规范（webman/event）', 'description' => 'webman/event 使用规范门禁（见 docs/webman-event-standard.md）：事件发射一律用 Event::dispatch（不吞异常，监听器异常上抛），禁止 Event::emit（吞异常掩盖监听器故障）；事件名必须 <提供方>.<领域>.<动作> 全小写点分（禁驼峰/连字符/下划线分隔/无前缀裸名）；业务代码禁止散落 Event::on()（监听器集中 config/plugin/*/event.php 或 config/event.php 声明，唯一例外 radmin EventRegister 内置 member.*）；静态事件名应在本包/跨包/宿主有对应监听器（孤儿事件=发射即空转，纯日志应直写日志）；app/listener 监听器方法签名 (array $data): void + 自身 try/catch；文件标注 @audit-ignore event_standard 显式豁免'],
+        'common_utils' => ['title' => '通用工具真源门禁（禁止重复造轮子）', 'description' => '通用工具真源门禁（见 docs/common-utils-registry.md）：已知手写重复模式必须用 radmin 全局函数——max(1, min(100 → clamp_limit、分页 max(1, (int) → clamp_page、keyword/quickSearch 兼容链 → request_keyword、where 闭包多字段 like → keyword_like、json_encode(UNICODE|SLASHES) → json_unicode、strtr(base64_encode → base64url_encode、md5(uniqid → uuid7、固定四星掩码 → mask_secret；真源定义文件（radmin functions.php）与审计引擎自身源文件豁免；文件标注 @audit-ignore common_utils 显式豁免'],
     ];
 
     /** 问题明细入库/返回上限（完整数量在 count） */
@@ -136,6 +137,7 @@ class AuditService
             'dto_contract' => 'no public api controllers',
             'llm_gate' => 'no src/app dir',
             'event_standard' => 'no src/app dir',
+            'common_utils' => 'no src dir',
         ];
         $packages = [];
         foreach ($pkgs as $name) {
@@ -1642,5 +1644,76 @@ class AuditService
             }
         }
         return false;
+    }
+
+    /**
+     * 通用工具真源门禁：已知手写重复模式必须用 radmin 全局函数
+     * （真源清单见 docs/common-utils-registry.md）。
+     *
+     * 检测模式与建议替换：
+     *   - max(1, min(100, ...))                       -> clamp_limit()
+     *   - 分页 max(1, (int) ...input('page'...))      -> clamp_page()
+     *   - keyword/quickSearch 兼容链                  -> request_keyword()
+     *   - where(function ($q) use ($keyword) {...})   -> keyword_like()
+     *   - json_encode($x, UNICODE | SLASHES)          -> json_unicode()
+     *   - strtr(base64_encode(...))                   -> base64url_encode()
+     *   - md5(uniqid(...))                            -> uuid7()
+     *   - 固定四星掩码 mb_substr(...).'****'.mb_substr(...) -> mask_secret()
+     *
+     * 豁免：radmin functions.php（真源定义）、审计引擎自身源文件、
+     * 文件标注 @audit-ignore common_utils 显式声明。
+     */
+    protected function checkCommonUtils(string $root, string $pkg, string $dir): ?array
+    {
+        $srcDir = "$dir/src";
+        if (!is_dir($srcDir)) {
+            return null;
+        }
+        $issues = [];
+        foreach ($this->phpFiles($srcDir) as $file) {
+            $rel = str_replace($root . '/', '', $file);
+            $base = basename($file);
+            // 真源定义文件与审计引擎自身（含各探测模式字面量）豁免
+            if ($pkg === 'radmin' && $base === 'functions.php') {
+                continue;
+            }
+            if ($base === 'AuditService.php') {
+                continue;
+            }
+            $src = file_get_contents($file);
+            if (str_contains($src, '@audit-ignore common_utils')) {
+                continue; // 显式豁免标注
+            }
+            $lines = file($file) ?: [];
+            foreach ($lines as $i => $line) {
+                $ln = $i + 1;
+                $t = trim($line);
+                if ($t === '' || str_starts_with($t, '//') || str_starts_with($t, '*') || str_starts_with($t, '/*')) {
+                    continue;
+                }
+                $hit = '';
+                if (preg_match('~max\(1,\s*min\(100~', $line)) {
+                    $hit = '手写 limit clamp（应使用 radmin clamp_limit()）';
+                } elseif (preg_match('~max\(1,\s*\(int\)\s*(?:\$this->request->|\$request->)input\(\'page\'~', $line)) {
+                    $hit = '手写 page clamp（应使用 radmin clamp_page()）';
+                } elseif (preg_match('~input\(\'keyword\',\s*(?:\$this->request->|\$request->)input\(\'quickSearch\'~', $line)) {
+                    $hit = '手写 keyword/quickSearch 兼容链（应使用 radmin request_keyword()）';
+                } elseif (preg_match('~where\(function\s*\(\$q\)\s*use\s*\(\$keyword\)~', $line)) {
+                    $hit = '手写多字段 like 闭包（应使用 radmin keyword_like()）';
+                } elseif (preg_match('~json_encode\([^,]+,\s*JSON_UNESCAPED_UNICODE\s*\|\s*JSON_UNESCAPED_SLASHES\s*\)~', $line)) {
+                    $hit = '手写 JSON flag 组合（应使用 radmin json_unicode()）';
+                } elseif (str_contains($line, 'strtr(base64_encode(')) {
+                    $hit = '手写 URL-safe base64（应使用 radmin base64url_encode()）';
+                } elseif (preg_match('~md5\(uniqid\(~', $line)) {
+                    $hit = '手写伪随机 ID（应使用 radmin uuid7()）';
+                } elseif (preg_match("~\.\s*'\*{4}'\s*\.~", $line) || str_contains($line, 'str_repeat(\'*\'')) {
+                    $hit = '手写固定掩码（应使用 radmin mask_secret()，等长掩码不泄漏长度）';
+                }
+                if ($hit !== '') {
+                    $issues[] = "$rel:$ln: $hit";
+                }
+            }
+        }
+        return ['issues' => $issues, 'note' => 'src scanned（真源豁免：radmin functions.php）'];
     }
 }

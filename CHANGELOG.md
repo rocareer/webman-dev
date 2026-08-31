@@ -1,5 +1,17 @@
 # Changelog
 
+## [v3.12.0] - 2026-08-31
+
+### 新增：common_utils 通用工具真源门禁（禁止重复造轮子）
+
+- `rocareer:audit` 新增 `common_utils` 门禁（见 docs/common-utils-registry.md）：
+  检测已知手写重复模式必须用 radmin 全局函数——max(1,min(100→clamp_limit、分页→clamp_page、
+  keyword/quickSearch→request_keyword、where 闭包多字段 like→keyword_like、
+  json_encode(UNICODE|SLASHES)→json_unicode、strtr(base64_encode→base64url_encode、
+  md5(uniqid→uuid7、固定四星掩码→mask_secret；
+  真源定义文件（radmin functions.php）与审计引擎自身源文件豁免；文件标注
+  `@audit-ignore common_utils` 显式豁免。
+
 ## [v3.11.9] - 2026-08-31
 
 ### 修复：orm_migrated 审计补 :: 静态形态扫描（think 专属静态调用防回归）
