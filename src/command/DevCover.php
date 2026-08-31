@@ -12,7 +12,7 @@ use Symfony\Component\Console\Output\OutputInterface;
  * @audit-ignore orm_migrated（legacy 代码风格迁移的 think-orm 映射键为意向保留）
  *
  * 在 radmin 根目录（radmin_base()）下按配置的 contents 映射批量执行 str_replace，
- * 用于把旧版代码风格迁移为当前 radmin 插件风格（如 think\facade\Db → support\orm\Db、
+ * 用于把旧版代码风格迁移为当前 radmin 插件风格（如 think\facade\Db → support\Db、
  * app\admin\model → plugin\radmin\... 等），并输出每个文件/目录的替换结果。
  */
 class DevCover extends Command

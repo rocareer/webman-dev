@@ -1,5 +1,13 @@
 # Changelog
 
+## [v3.11.7] - 2026-08-31
+
+### 修复：DevCover 注释收敛（support\Db 门面）
+
+- `dev:cover` 命令文档注释 `support\orm\Db` → `support\Db`（radmin 已移除 support\orm\Db）。
+
+
+
 ## [v3.11.6] - 2026-08-31
 
 ### 修复：orm_migrated 审计扫描扩展至 database/ 迁移目录
