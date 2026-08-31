@@ -112,7 +112,6 @@ class DevCover extends Command
             'use app\admin\library\\'=>'use plugin\radmin\app\admin\library\\',
             "=> public/npm-"=>"=> plugin/radmin/public/npm-",
             "=> 'plugin/radmin/plugin/radmin/public/npm-"=>"=> 'plugin/radmin/public/npm-",
-            "= config('database'"=>"= config('think-orm"
 
 
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## [v3.11.8] - 2026-08-31
+
+### 修复：orm_migrated 审计补 Db::connect 规则 + DevCover 反向映射清理
+
+- AuditService `orm_migrated` 门禁新增 `Db::connect(` 扫描（think 门面方法，全域收口防回归）；
+- `dev:cover` 删除 `= config('database'` → `= config('think-orm'` 反向映射
+  （v4 起配置键为 database，该映射会生成错误代码）；docblock 注释同步收敛。
+
+
+
 ## [v3.11.7] - 2026-08-31
 
 ### 修复：DevCover 注释收敛（support\Db 门面）

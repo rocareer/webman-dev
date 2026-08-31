@@ -1274,11 +1274,14 @@ class AuditService
             'config("think-orm',
             // think 查询语义残留（v4.0.0 收敛后禁止回退）
             '->whereLike(',
-            '->withJoin(',
+            // withJoin 需覆盖换行形态（`->\nwithJoin(` 换行写法逃过 '->withJoin(' 字面匹配，
+            // 故用裸 'withJoin('：不会误伤 withJoinRelations(/withJoinTable/withJoinType 配置属性）
+            'withJoin(',
             '->withoutField(',
             '->whereOr(',
             '->saveAll(',
             '->startTrans(',
+            'Db::connect(',
             'Db::name(',
             'Db::query(',
             'Db::execute(',
