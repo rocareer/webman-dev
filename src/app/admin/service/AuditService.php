@@ -538,7 +538,7 @@ class AuditService
 
     /**
      * 常驻进程代码内同步阻塞 IO 检查（依据「异步铁律」沉淀规则，审计 2026-08-28 实战）：
-     *   1. 阻塞休眠：usleep(/sleep(（排除 Fiber::sleep / Timer::sleep 封装与封装类自身）
+     *   1. 阻塞休眠：usleep(/sleep(（排除 Timer::sleep 封装与封装类自身）
      *   2. Redis 阻塞长拉：->brpop(
      *   3. curl_exec（同步）
      *   4. SMTP 同步发送：$mailer->send( / ->send($email)
@@ -555,8 +555,8 @@ class AuditService
         foreach ($this->phpFiles($appDir) as $file) {
             $rel = str_replace($root . '/', '', $file);
             $base = basename($file);
-            if ($base === 'Install.php' || $base === 'Fiber.php') {
-                continue; // Install 钩子；Fiber.php 为 Fiber::sleep 封装实现（usleep 合法）
+            if ($base === 'Install.php') {
+                continue; // Install 钩子（composer 触发、框架未加载）
             }
             if ($base === 'AuditService.php') {
                 continue; // 审计引擎自身源文件：含各探测模式字面量（brpop/curl_exec 等），自扫必误报
@@ -585,9 +585,9 @@ class AuditService
                 if ($t === '' || str_starts_with($t, '//') || str_starts_with($t, '*') || str_starts_with($t, '/*')) {
                     continue;
                 }
-                // 阻塞休眠（排除 $var()/->/:: 方法形式与 function 声明；Fiber/Timer 封装安全）
+                // 阻塞休眠（排除 $var()/->/:: 方法形式与 function 声明；Timer 封装安全）
                 if (preg_match('~(?<![\w$:>-])(?:usleep|sleep)\s*\(~', $line) && !preg_match('~function\s+(?:usleep|sleep)~', $line)) {
-                    $issues[] = "$rel:$ln: 阻塞休眠 usleep/sleep（应使用 Fiber::sleep / Timer::sleep 挂起协程）";
+                    $issues[] = "$rel:$ln: 阻塞休眠 usleep/sleep（应使用 Workerman\Timer::sleep 挂起协程）";
                 }
                 if (str_contains($line, '->brpop(')) {
                     $issues[] = "$rel:$ln: 同步 BRPOP 长拉（占死 worker；长轮询应改客户端驱动轮询）";

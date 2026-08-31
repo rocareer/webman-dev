@@ -1,5 +1,12 @@
 # Changelog
 
+## [v3.11.3] - 2026-08-31
+
+### 修复：audit async_blocking 规则文案与豁免同步自研 Fiber 收敛
+
+- 阻塞休眠提示由「Fiber::sleep / Timer::sleep」改为官方 `Workerman\Timer::sleep` 唯一；
+- 移除 `Fiber.php` 文件豁免（自研 Fiber 类已删除，见 ai v2.4.5）。
+
 ## [v3.11.2] - 2026-08-31
 
 ### 修复：分页参数收敛到 radmin 全局函数
