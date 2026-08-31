@@ -13,7 +13,7 @@ use app\common\model\BaseModel;
  */
 class DevAuditProject extends BaseModel
 {
-    protected $name = 'radmin_dev_audit_project';
+    protected $table = 'radmin_dev_audit_project';
 
     /**
      * 关闭时间字段自动格式化（think-orm v4 会把 create_time/update_time 的 int 值
@@ -24,7 +24,7 @@ class DevAuditProject extends BaseModel
     public const STATUS_ENABLED = 'enabled';
     public const STATUS_DISABLED = 'disabled';
 
-    protected $type = [
+    protected $casts = [
         'last_run_at' => 'integer',
         'last_issue_count' => 'integer',
         'create_time' => 'integer',

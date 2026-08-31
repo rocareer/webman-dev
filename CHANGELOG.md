@@ -1,5 +1,12 @@
 # Changelog
 
+## [v3.11.2] - 2026-08-31
+
+### 修复：分页参数收敛到 radmin 全局函数
+
+- AuditResult 控制器的 `max(1, min(100, ...))` 手写 clamp 与 keyword 兼容链 → `clamp_limit()`/`clamp_page()`/`request_keyword()`；
+- 真源唯一：分页与搜索参数统一走 radmin 全局函数。
+
 ## [v3.11.1] - 2026-08-30
 
 ### 修复：审计项目页自定义表头按钮样式对齐 BuildAdmin 标准

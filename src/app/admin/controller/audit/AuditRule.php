@@ -34,10 +34,12 @@ class AuditRule extends Backend
     {
         list($where, $alias, $limit, $order) = $this->queryBuilder();
         $res = $this->model
-            ->alias($alias)
-            ->where($where)
-            ->order($order)
+            ->from($this->queryFromTable($alias))
+            ->where(function ($query) use ($where) {
+                $this->applyWhereArray($query, $where);
+            })
             ->paginate($limit);
+        $this->applyOrderBy($res, $order);
         return $this->success('', [
             'list' => $res->items(),
             'total' => $res->total(),
@@ -56,7 +58,6 @@ class AuditRule extends Backend
         try {
             $data = $this->excludeFields($data);
             $row = new DevAuditRule();
-            $this->model->getQuery()->getTableFields();
             $this->fill($row, $data);
             $row->save();
         } catch (Throwable $e) {
@@ -80,7 +81,6 @@ class AuditRule extends Backend
         }
         try {
             $this->fill($row, $this->excludeFields($this->request->post()));
-            $row->getQuery()->getTableFields();
             $row->save();
         } catch (Throwable $e) {
             return $this->error('保存失败: ' . $e->getMessage());

@@ -13,7 +13,7 @@ use app\common\model\BaseModel;
  */
 class DevAuditResult extends BaseModel
 {
-    protected $name = 'radmin_dev_audit_result';
+    protected $table = 'radmin_dev_audit_result';
 
     /**
      * 关闭时间字段自动格式化（think-orm v4 会把 create_time/update_time 的 int 值
@@ -21,7 +21,7 @@ class DevAuditResult extends BaseModel
      */
     protected $dateFormat = false;
 
-    protected $type = [
+    protected $casts = [
         'project_id' => 'integer',
         'is_pass' => 'integer',
         'issue_count' => 'integer',

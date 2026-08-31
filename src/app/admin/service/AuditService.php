@@ -1270,6 +1270,39 @@ class AuditService
             'use think\\Exception;',
             "config('think-orm",
             'config("think-orm',
+            // think 查询语义残留（v4.0.0 收敛后禁止回退）
+            '->whereLike(',
+            '->withJoin(',
+            '->withoutField(',
+            '->whereOr(',
+            '->saveAll(',
+            '->startTrans(',
+            'Db::name(',
+            'Db::query(',
+            'Db::execute(',
+            '->getQuery()->getTableFields(',
+            '->getData(',
+            'onBeforeInsert',
+            'onBeforeUpdate',
+            'onAfterInsert',
+            'onBeforeDelete',
+            'onBeforeWrite',
+            'protected $autoWriteTimestamp',
+            'protected $createTime',
+            'protected $updateTime',
+        ];
+        // 行级语义残留（正则精确匹配，避免误报 Eloquent 原生 API 与控制器方法调用）
+        $lineForbidden = [
+            '/->order\(/' => '->order(',
+            '/->field\(/' => '->field(',
+            '/->alias\(/' => '->alias(',
+            '/->column\(/' => '->column(',
+            '/->group\(/' => '->group(',
+            '/(?<!\$this)->select\(\)/' => '->select() 无参（think 语义执行查询）',
+            '/(?<!\$this)->find\(\)/' => '->find() 无参（think 语义取首行）',
+            '/function (get|set)[A-Za-z0-9_]+Attr\(/' => 'getXxxAttr/setXxxAttr 访问器（应改 getXxxAttribute）',
+            '/protected \$type\s*=\s*\[/' => '模型 $type（应改 $casts）',
+            '/protected \$name\s*=\s*[\'"]/' => '模型 $name（应改 $table）',
         ];
         $issues = [];
         foreach ($this->phpFiles("$dir/src") as $f) {
@@ -1280,10 +1313,21 @@ class AuditService
             if (basename($f) === 'AuditService.php') {
                 continue; // 审计引擎自身的模式字面量自扫必误报
             }
+            $file = ltrim(str_replace("$dir/", '', $f), '/');
+            $hit  = false;
             foreach ($forbidden as $pat) {
                 if (str_contains($content, $pat)) {
-                    $file = ltrim(str_replace("$dir/", '', $f), '/');
                     $issues[] = "$file: " . str_replace('\\', '\\', $pat);
+                    $hit = true;
+                    break;
+                }
+            }
+            if ($hit) {
+                continue; // 已命中禁用模式，不再重复报告行级残留
+            }
+            foreach ($lineForbidden as $pattern => $label) {
+                if (preg_match($pattern, $content)) {
+                    $issues[] = "$file: $label";
                     break;
                 }
             }

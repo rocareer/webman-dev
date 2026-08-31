@@ -41,10 +41,12 @@ class AuditProject extends Backend
     {
         list($where, $alias, $limit, $order) = $this->queryBuilder();
         $res = $this->model
-            ->alias($alias)
-            ->where($where)
-            ->order($order)
+            ->from($this->queryFromTable($alias))
+            ->where(function ($query) use ($where) {
+                $this->applyWhereArray($query, $where);
+            })
             ->paginate($limit);
+        $this->applyOrderBy($res, $order);
         $items = [];
         foreach ($res->items() as $row) {
             $item = $row->toArray();
@@ -71,7 +73,6 @@ class AuditProject extends Backend
         try {
             $data = $this->excludeFields($data);
             $row = new DevAuditProject();
-            $this->model->getQuery()->getTableFields();
             $this->fill($row, $data);
             $row->save();
         } catch (Throwable $e) {
@@ -95,7 +96,6 @@ class AuditProject extends Backend
         }
         try {
             $this->fill($row, $this->excludeFields($this->request->post()));
-            $row->getQuery()->getTableFields();
             $row->save();
         } catch (Throwable $e) {
             return $this->error('保存失败: ' . $e->getMessage());
@@ -170,14 +170,14 @@ class AuditProject extends Backend
         $ids = is_array($raw) ? array_values(array_filter(array_map('intval', $raw))) : [];
         $query = DevAuditProject::where('status', DevAuditProject::STATUS_ENABLED);
         if (!empty($ids)) {
-            $query = $query->where('id', 'in', $ids);
+            $query = $query->whereIn('id', $ids);
         }
-        $projects = $query->select();
+        $projects = $query->get();
         if (empty($projects)) {
             return $this->error('没有可审计的项目（请先添加/启用项目）');
         }
         // 启用中的规则 code（页面可停用规则临时缩小审计范围）
-        $codes = DevAuditRule::where('status', DevAuditRule::STATUS_ENABLED)->column('name');
+        $codes = DevAuditRule::where('status', DevAuditRule::STATUS_ENABLED)->pluck('name')->all();
 
         $service = new AuditService();
         $root = $service->rootPath();

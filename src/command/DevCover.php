@@ -77,8 +77,8 @@ class DevCover extends Command
             // "\$Member::hasRole('super')"=>"Member::hasRole('super')"
             '$this->auth->getAllAuthGroups'=>'AdminHelper::getAllAuthGroups',
             '$this->request->request('=>'$this->request->input(',
-            '     $this->select();'=>'return $this->select();',
-            // '                 return $this->select();'=>'            return $this->select();'
+            '     $this->get();'=>'return $this->get();',
+            // '                 return $this->get();'=>'            return $this->get();'
             '$this->request->param('=>'$this->request->input(',
             "\$this->request->input('ids/a', []);"=>"\$this->request->input('ids', []);",
             '        parent::del();'=>'        return parent::del();',

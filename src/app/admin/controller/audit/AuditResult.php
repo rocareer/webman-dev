@@ -30,7 +30,7 @@ class AuditResult extends Backend
      */
     public function index(): Response
     {
-        $query = DevAuditResult::order('run_at', 'desc')->order('id', 'desc');
+        $query = DevAuditResult::orderBy('run_at', 'desc')->orderBy('id', 'desc');
         $latest = (int) $this->request->input('latest', 0);
         if ($latest) {
             $max = (int) DevAuditResult::max('run_at');
@@ -57,12 +57,12 @@ class AuditResult extends Backend
         $keyword = (string) $this->request->input('quickSearch', '');
         if ($keyword !== '') {
             $query = $query->where(function ($q) use ($keyword) {
-                $q->whereLike('project_name', '%' . $keyword . '%')->whereOr('rule_title', 'like', '%' . $keyword . '%');
+                $q->where('project_name', 'like', '%' . $keyword . '%')->orWhere('rule_title', 'like', '%' . $keyword . '%');
             });
         }
-        $limit = max(1, min(100, (int) $this->request->input('limit', 10)));
-        $page = max(1, (int) $this->request->input('page', 1));
-        $paginator = $query->paginate(['list_rows' => $limit, 'page' => $page]);
+        $limit = clamp_limit((int) $this->request->input('limit', 10));
+        $page = clamp_page((int) $this->request->input('page', 1));
+        $paginator = $query->paginate($limit, ['*'], 'page', $page);
         return $this->success('', [
             'list' => $paginator->items(),
             'total' => $paginator->total(),
@@ -101,7 +101,9 @@ class AuditResult extends Backend
      */
     public function runs(): Response
     {
-        $rows = DevAuditResult::field('run_at')->group('run_at')->order('run_at', 'desc')->limit(30)->select();
+        $rows = DevAuditResult::select(array (
+  0 => 'run_at',
+))->groupBy('run_at')->orderBy('run_at', 'desc')->limit(30)->get();
         $list = [];
         foreach ($rows as $row) {
             $list[] = (int) $row->run_at;
