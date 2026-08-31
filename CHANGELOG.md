@@ -1,5 +1,15 @@
 # Changelog
 
+## [v3.11.9] - 2026-08-31
+
+### 修复：orm_migrated 审计补 :: 静态形态扫描（think 专属静态调用防回归）
+
+- AuditService `orm_migrated` 门禁新增 `::order(/::field(/::alias(/::column(/::whereLike(`、
+  `::select()` 无参、`::find()` 无参等静态形态扫描（Eloquent 无此形态会
+  BadMethodCallException 或静默失效，2026-08-31 曾漏检 DriverService/ChatService）。
+
+
+
 ## [v3.11.8] - 2026-08-31
 
 ### 修复：orm_migrated 审计补 Db::connect 规则 + DevCover 反向映射清理

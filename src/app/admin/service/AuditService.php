@@ -1313,8 +1313,17 @@ class AuditService
             '/->alias\(/' => '->alias(',
             '/->column\(/' => '->column(',
             '/->group\(/' => '->group(',
+            // :: 静态形态（think 专属静态调用，如 Model::order()/Model::field() 等；Eloquent 无
+            // 此形态会 BadMethodCallException 或静默失效，2026-08-31 曾漏检 DriverService/ChatService）
+            '/::order\(/' => '::order( 静态（think 语义，应改 orderBy）',
+            '/::field\(/' => '::field( 静态（think 语义，应改 select）',
+            '/::alias\(/' => '::alias( 静态（think 语义，应改 from ... as）',
+            '/::column\(/' => '::column( 静态（think 语义，应改 pluck）',
+            '/::whereLike\(/' => '::whereLike( 静态（think 语义，应改 where like）',
             '/(?<!\$this)->select\(\)/' => '->select() 无参（think 语义执行查询）',
             '/(?<!\$this)->find\(\)/' => '->find() 无参（think 语义取首行）',
+            '/(?<!\$this)::select\(\)/' => '::select() 无参（think 语义执行查询）',
+            '/(?<!\$this)::find\(\)/' => '::find() 无参（think 语义取首行）',
             '/function (get|set)[A-Za-z0-9_]+Attr\(/' => 'getXxxAttr/setXxxAttr 访问器（应改 getXxxAttribute）',
             '/protected \$type\s*=\s*\[/' => '模型 $type（应改 $casts）',
             '/protected \$name\s*=\s*[\'"]/' => '模型 $name（应改 $table）',
