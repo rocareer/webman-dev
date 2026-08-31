@@ -1,5 +1,12 @@
 # Changelog
 
+## [v3.12.1] - 2026-08-31
+
+### 优化：php -l 语法检查并行化（全量审计 49s → 8.6s）
+
+- checkPhpSyntax 由 xargs -n1 串行逐文件 php -l（487 文件 = 487 次进程启动）改为 -P 并行（CLI 按 CPU 核数 nproc/sysctl 检测，常驻进程固定 8），耗时 -86%；
+- 新增 syntaxJobs() 核数检测（macOS sysctl / Linux nproc，兜底 8，上限 32；fiber 协程上下文不做阻塞式 shell 检测）。
+
 ## [v3.12.0] - 2026-08-31
 
 ### 新增：common_utils 通用工具真源门禁（禁止重复造轮子）

@@ -188,10 +188,28 @@ class AuditService
 
     /* ---------- 1. PHP 语法检查（批量子进程） ---------- */
 
+    /**
+     * 并行 php -l 子进程数（Linux nproc / macOS sysctl；常驻进程内固定 8，避免额外阻塞式 shell 检测）
+     */
+    protected static ?int $syntaxJobs = null;
+
+    protected function syntaxJobs(): int
+    {
+        if (self::$syntaxJobs !== null) {
+            return self::$syntaxJobs;
+        }
+        if (class_exists(\Workerman\Coroutine::class) && \Workerman\Coroutine::isCoroutine()) {
+            return self::$syntaxJobs = 8; // 常驻进程：固定并行数
+        }
+        $cmd = PHP_OS_FAMILY === 'Darwin' ? 'sysctl -n hw.ncpu 2>/dev/null' : 'nproc 2>/dev/null';
+        $n = (int) trim((string) shell_exec($cmd) ?: '');
+        return self::$syntaxJobs = max(2, min($n ?: 8, 32));
+    }
+
     protected function checkPhpSyntax(string $root, string $pkg, string $dir): array
     {
         $files = $this->phpFiles($dir);
-        $cmd = 'find ' . escapeshellarg($dir) . " -name '*.php' -not -path '*/vendor/*' -print0 2>/dev/null | xargs -0 -n1 php -l 2>&1";
+        $cmd = 'find ' . escapeshellarg($dir) . " -name '*.php' -not -path '*/vendor/*' -print0 2>/dev/null | xargs -0 -P" . $this->syntaxJobs() . " -n1 php -l 2>&1";
         // 常驻进程（webman worker）内禁止阻塞式子进程等待：fiber 协程上下文走非阻塞轮询，CLI 回退同步
         $out = class_exists(\Workerman\Coroutine::class) && \Workerman\Coroutine::isCoroutine()
             ? $this->runAsync($cmd)
