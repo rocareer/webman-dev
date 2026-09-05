@@ -1611,7 +1611,9 @@ class AuditService
             }
         }
         // 键形态2：$listeners['xxx.yyy'] = [
-        if (preg_match_all("~\$listeners\s*\[\s*['\"]([a-z][a-z0-9_.]*)['\"]\s*\]~i", $src, $m2)) {
+        // 注意：双引号字符串中 \\\$listeners 解析为 \$listeners（正则匹配字面 $，
+        // 若写成 \$listeners 则 $ 成为行尾锚点，动态赋值形态从未被识别——2026-09-05 修复）
+        if (preg_match_all("~\\\$listeners\s*\[\s*['\"]([a-z][a-z0-9_.]*)['\"]\s*\]~i", $src, $m2)) {
             foreach ($m2[1] as $name) {
                 $this->addEventName($name, $events, $prefixes);
             }

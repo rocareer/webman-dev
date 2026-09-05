@@ -1,5 +1,14 @@
 # Changelog
 
+## [v3.13.1] - 2026-09-05
+
+### 修复：audit event_standard 事件收集正则（动态 $listeners 赋值从未被识别）
+
+- 形态 2 正则（`$listeners['x'] = [`）在双引号字符串中 `\$listeners` 被解析为
+  `$listeners`（正则里 `$` 变行尾锚点）→ 动态事件收集从未命中，webman-dev 的
+  `mcp.collections.register` 监听被误报「无监听器（发射即空转）」；
+  改为 `\\$listeners` 转义后正常命中（mcp 误报消除）。
+
 ## [v3.13.0] - 2026-08-31
 
 ### 新增：rocareer:audit install_standard 规则 + Install.php 标准化
