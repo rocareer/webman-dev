@@ -41,7 +41,6 @@ class MakeCrud extends Command
     "table": {
         "name": "cc_student",
         "comment": "学员管理",
-        "module": "cc",
         "quick_search": ["name", "mobile"]
     },
     "fields": [
@@ -99,15 +98,18 @@ JSON;
         $base = $this->basePath();
         $noMigration = (bool) $input->getOption('no-migration');
 
-        // 1) 幂等迁移文件落盘（默认）
+        // 1) 幂等迁移文件落盘（默认；同名表迁移已存在则复用提示，不重复写）
         $migrationFile = '';
         if (!$noMigration) {
-            $migrationFile = $base . '/database/migrations/' . $parsed['ts'] . '_' . $parsed['table_name'] . '_crud.php';
-            if (is_file($migrationFile)) {
-                $io->error('迁移文件已存在：' . $migrationFile);
-                return self::FAILURE;
+            $migrationDir = $base . '/database/migrations';
+            $existing = glob($migrationDir . '/*_' . $parsed['table_name'] . '_crud.php');
+            if ($existing) {
+                $io->note('同名表迁移已存在：' . str_replace($base . '/', '', $existing[0]) . '（跳过写迁移；表已 migrate:run 则直接出代码）');
+                $migrationFile = '';
+            } else {
+                $migrationFile = $migrationDir . '/' . $parsed['ts'] . '_' . $parsed['table_name'] . '_crud.php';
+                $this->writeFile($migrationFile, $parsed['migration']);
             }
-            $this->writeFile($migrationFile, $parsed['migration']);
         }
 
         // 2) 目标文件冲突预检（controller/model/validate/web 落点由引擎推导，先探测）
@@ -132,7 +134,7 @@ JSON;
         $io->writeln('  表：' . $parsed['table_name'] . '（comment=' . $parsed['table']['comment'] . '）');
         if ($migrationFile !== '') {
             $io->writeln('  迁移：' . str_replace($base . '/', '', $migrationFile));
-            $io->writeln('  > 请执行 php webman migrate:run 建表（幂等可重复）；表就绪后重跑本命令即可补出代码（幂等覆盖需 --force）');
+            $io->writeln('  > 请执行 php webman migrate:run 建表（幂等可重复）；表就绪后重跑本命令即可补出代码（覆盖需 --force）');
         }
         $io->writeln('  菜单：/admin/' . $parsed['menu_name'] . '/index（含 index/add/edit/del/sortable 权限，幂等种入）');
         if (($result['crud_log'] ?? null)) {
@@ -144,33 +146,29 @@ JSON;
     }
 
     /**
-     * 探测目标文件冲突（控制器/模型/验证器/前端 views/lang；表已由迁移建则不查表）
+     * 探测目标文件冲突（控制器/模型/验证器/前端 views/lang；路径按引擎惯例：表名下划线=目录层级）
      */
     protected function detectConflicts(string $base, array $parsed): array
     {
-        $table = $parsed['table'];
-        $files = [
-            'app/admin/controller' => $table['controllerFile'] ?? '',
-            'app/admin/model' => $table['modelFile'] ?? '',
-            'app/admin/validate' => $table['validateFile'] ?? '',
-        ];
+        $name = $parsed['table_name'];
+        $path = str_replace('_', '/', $name);      // demo/student
+        $parts = explode('/', $path);
+        $uc = CrudDesigner::camel((string) array_pop($parts));
+        $dir = implode('/', $parts);
+        $prefix = $dir !== '' ? $dir . '/' : '';
         $conflicts = [];
-        foreach ($files as $dir => $file) {
-            if ($file === '') {
-                // 引擎按表名推导：app/admin/controller/<Table>.php
-                $file = $dir . '/' . CrudDesigner::camel($parsed['table_name']) . '.php';
-            }
-            $p = $base . '/' . $file;
-            if (is_file($p)) {
+        $candidates = [
+            "app/admin/controller/{$prefix}{$uc}.php",
+            "app/admin/model/{$prefix}{$uc}.php",
+            "app/admin/validate/{$prefix}{$uc}.php",
+            "web/src/views/backend/{$path}/index.vue",
+            "web/src/views/backend/{$path}/popupForm.vue",
+            "web/src/lang/backend/{$path}/zh-cn.ts",
+            "web/src/lang/backend/{$path}/en.ts",
+        ];
+        foreach ($candidates as $file) {
+            if (is_file($base . '/' . $file)) {
                 $conflicts[] = $file;
-            }
-        }
-        // web views/lang
-        $webViews = $table['webViewsDir'] ?? ('web/src/views/backend/' . $parsed['table_name']);
-        foreach (['index.vue', 'popupForm.vue'] as $vue) {
-            $p = $base . '/' . $webViews . '/' . $vue;
-            if (is_file($p)) {
-                $conflicts[] = $webViews . '/' . $vue;
             }
         }
         return $conflicts;

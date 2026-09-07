@@ -1,3 +1,14 @@
+## [v3.15.2] - 2026-09-07
+
+### 修复：表名目录语义对齐引擎 + 迁移复用 + 冲突探测同源（make-crud/MCP 定版行为）
+
+- **表名下划线 = 页面/菜单目录层级**（对齐后台 /admin/crud 引擎 parseNameData 语义）：
+  cc_student → 控制器 app/admin/controller/cc/Student.php、页面 web/src/views/backend/cc/student/、
+  菜单 cc/student——移除错误的 module 参数（此前显式拼路径导致 vue 落 demo/demo/student 双目录）
+- 冲突探测/generatedFiles 摘要改为与引擎同源推导（表名拆路径 + 末段 Camel）
+- 迁移文件同表名复用：已存在 `*_<table>_crud.php` 则跳过写新文件（防重复运行产生冗余迁移）
+- CrudDesigner/README/MCP inputSchema 同步（design_type 白名单注释、目录约定说明）
+
 ## [v3.15.1] - 2026-09-07
 
 ### 修复：switch 字段类型 int 化（防 PG boolean 分叉，迁移与引擎 DDL 同构）

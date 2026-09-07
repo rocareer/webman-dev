@@ -14,7 +14,6 @@ use InvalidArgumentException;
  * 简化设计格式（JSON）：
  * {
  *   "table": { "name": "cc_student", "comment": "学员管理",
- *              "module": "cc",                      // 可选：代码落 <module> 目录
  *              "quick_search": ["name", "mobile"] } // 可选：搜索字段（缺省=全部 input/textarea）
  *   "fields": [
  *     { "name": "name", "comment": "姓名", "design_type": "input", "length": 50, "required": true },
@@ -22,6 +21,10 @@ use InvalidArgumentException;
  *     ...
  *   ]
  * }
+ *
+ * 目录约定（对齐后台 /admin/crud 引擎）：表名下划线 = 页面/菜单目录层级——
+ * cc_student → 菜单 cc/student、页面 web/src/views/backend/cc/student/、控制器
+ * app/admin/controller/cc/Student.php（表名前缀即模块目录，无需额外 module 参数）。
  *
  * 字段键（均可选）：name/comment 必填；design_type 必填（白名单见 DESIGN_TYPES）；
  * length（input/select 等 varchar 长度，缺省 255）；required（NOT NULL）；
@@ -84,11 +87,6 @@ class CrudDesigner
         }
         if ($comment === '') {
             throw new InvalidArgumentException('table.comment 必填（中文表名/菜单标题，如 学员管理）');
-        }
-        // 模块段（代码目录层级）白名单
-        $module = strtolower(trim((string) ($t['module'] ?? '')));
-        if ($module !== '' && !preg_match(self::NAME_RULE, $module)) {
-            throw new InvalidArgumentException('table.module 不合法（仅小写字母/数字/下划线）');
         }
 
         // ---- 1. 字段解析 ----
@@ -159,15 +157,9 @@ class CrudDesigner
             'defaultSortType' => 'desc',
             'isCommonModel' => false,
         ];
-        if ($module !== '') {
-            // 模块目录：app/admin/controller/<module>/<Name>.php + web/src/views/backend/<module>/<name>/
-            $tablePayload['controllerFile'] = "app/admin/controller/{$module}/" . self::camel($name) . '.php';
-            $tablePayload['modelFile'] = "app/admin/model/" . self::camel($name) . '.php';
-            $tablePayload['validateFile'] = "app/admin/validate/" . self::camel($name) . '.php';
-            $tablePayload['webViewsDir'] = "web/src/views/backend/{$module}/{$name}";
-        }
-        // 菜单名 = 引擎 getMenuName（module 段 + 末段）
-        $menuName = ($module !== '' ? "{$module}/{$name}" : $name);
+        // 菜单名 = 引擎 getMenuName：表名下划线即页面/菜单目录层级（cc_student -> cc/student，
+        // 代码落 app/admin/controller/cc/Student.php + web/src/views/backend/cc/student/）
+        $menuName = str_replace('_', '/', $name);
 
         // ---- 4. 迁移文件渲染（PG 幂等；表结构先迁移建好，引擎只出代码） ----
         $ts = $this->nextTs($name);
@@ -180,7 +172,7 @@ class CrudDesigner
             'ts' => $ts,
             'menu_name' => $menuName,
             'table_name' => $name,
-            'module' => $module,
+            'module' => '',
         ];
     }
 

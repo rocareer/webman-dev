@@ -57,9 +57,8 @@ class CrudCollection implements McpToolCollectionInterface
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
-                        'table_name' => ['type' => 'string', 'description' => '表名（小写蛇形，如 cc_student）'],
+                        'table_name' => ['type' => 'string', 'description' => '表名（小写蛇形，下划线即目录层级：cc_student → 菜单 cc/student、页面 backend/cc/student/、控制器 cc/Student.php）'],
                         'table_comment' => ['type' => 'string', 'description' => '表中文名/菜单标题（如 学员管理）'],
-                        'module' => ['type' => 'string', 'description' => '代码目录模块段（可选，如 cc → app/admin/controller/cc/ + web/src/views/backend/cc/）'],
                         'quick_search' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => '快捷搜索字段（缺省=全部 input/textarea）'],
                         'fields' => [
                             'type' => 'array',
@@ -99,7 +98,6 @@ class CrudCollection implements McpToolCollectionInterface
 
         $tableName = strtolower(trim((string) ($arguments['table_name'] ?? '')));
         $tableComment = trim((string) ($arguments['table_comment'] ?? ''));
-        $module = strtolower(trim((string) ($arguments['module'] ?? '')));
         $quickSearch = array_values(array_filter(array_map('strval', (array) ($arguments['quick_search'] ?? [])), 'strlen'));
         $noMigration = (bool) ($arguments['no_migration'] ?? false);
 
@@ -108,7 +106,6 @@ class CrudCollection implements McpToolCollectionInterface
             'table' => [
                 'name' => $tableName,
                 'comment' => $tableComment,
-                'module' => $module,
                 'quick_search' => $quickSearch,
             ],
             'fields' => [],
@@ -134,15 +131,15 @@ class CrudCollection implements McpToolCollectionInterface
             throw new \InvalidArgumentException('设计不合法：' . $e->getMessage(), 0, $e);
         }
 
-        // 1) 迁移文件落盘（默认）
+        // 1) 迁移文件落盘（默认；同名表迁移已存在则复用，不重复写）
         $migrationFile = '';
         if (!$noMigration) {
             $base = $this->basePath();
-            $migrationFile = $base . '/database/migrations/' . $parsed['ts'] . '_' . $parsed['table_name'] . '_crud.php';
-            if (is_file($migrationFile)) {
-                throw new \RuntimeException('迁移文件已存在（重复生成）：' . str_replace($base . '/', '', $migrationFile));
+            $existing = glob($base . '/database/migrations/*_' . $parsed['table_name'] . '_crud.php');
+            if (!$existing) {
+                $migrationFile = $base . '/database/migrations/' . $parsed['ts'] . '_' . $parsed['table_name'] . '_crud.php';
+                $this->writeFile($migrationFile, $parsed['migration']);
             }
-            $this->writeFile($migrationFile, $parsed['migration']);
         }
 
         // 2) 引擎生成（表已由迁移建 -> 只出代码；表不存在引擎按设计建表兜底）
@@ -176,22 +173,23 @@ class CrudCollection implements McpToolCollectionInterface
     }
 
     /**
-     * 预期生成文件清单（摘要用）
+     * 预期生成文件清单（摘要用；目录按引擎惯例：表名下划线=目录层级）
      */
     protected function generatedFiles(array $parsed): array
     {
         $name = $parsed['table_name'];
-        $module = $parsed['module'];
-        $uc = CrudDesigner::camel($name);
+        $path = str_replace('_', '/', $name);
+        $parts = explode('/', $path);
+        $uc = CrudDesigner::camel((string) array_pop($parts));
+        $dir = implode('/', $parts);
         $files = [];
-        $files[] = $module !== '' ? "app/admin/controller/{$module}/{$uc}.php" : "app/admin/controller/{$uc}.php";
-        $files[] = "app/admin/model/{$uc}.php";
-        $files[] = "app/admin/validate/{$uc}.php";
-        $dir = $module !== '' ? "web/src/views/backend/{$module}/{$name}" : "web/src/views/backend/{$name}";
-        $files[] = "{$dir}/index.vue";
-        $files[] = "{$dir}/popupForm.vue";
-        $langPrefix = $module !== '' ? $module . '/' : '';
-        $files[] = "web/src/lang/backend/{$langPrefix}{$name}/zh-cn.ts";
+        $files[] = 'app/admin/controller/' . ($dir !== '' ? $dir . '/' : '') . $uc . '.php';
+        $files[] = 'app/admin/model/' . ($dir !== '' ? $dir . '/' : '') . $uc . '.php';
+        $files[] = 'app/admin/validate/' . ($dir !== '' ? $dir . '/' : '') . $uc . '.php';
+        $files[] = "web/src/views/backend/{$path}/index.vue";
+        $files[] = "web/src/views/backend/{$path}/popupForm.vue";
+        $langPrefix = str_replace('_', '/', $name);
+        $files[] = "web/src/lang/backend/{$langPrefix}/zh-cn.ts";
         return $files;
     }
 

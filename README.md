@@ -56,7 +56,7 @@ baTable 体系页面必须经 baTable、弹窗提交走 onSubmit；radmin 同步
 
 ```json
 {
-  "table": { "name": "cc_student", "comment": "学员管理", "module": "cc", "quick_search": ["name"] },
+  "table": { "name": "cc_student", "comment": "学员管理", "quick_search": ["name"] },
   "fields": [
     { "name": "name", "comment": "姓名", "design_type": "input", "length": 50, "required": true },
     { "name": "status", "comment": "状态: 0=禁用,1=启用", "design_type": "switch", "default": "1" },
@@ -78,7 +78,7 @@ baTable 体系页面必须经 baTable、弹窗提交走 onSubmit；radmin 同步
 
 同上 MCP 集合机制，本包自动注册 **crud_generate**（集合 key=`crud`，子端点 `/mcp/crud`）：
 
-- 参数平铺：`table_name` / `table_comment` / `module` / `quick_search` / `fields`（嵌套对象数组）/ `no_migration`；
+- 参数平铺：`table_name` / `table_comment` / `quick_search` / `fields`（嵌套对象数组）/ `no_migration`；
 - 与 CLI `rocareer:make-crud`、后台 `/admin/crud` 共用同一引擎（CrudService + CrudDesigner），AI 客户端
 （DSH / Claude Desktop / agent）可直接「给字段设计 → 拿标准模块」；字段白名单：
   input/textarea/editor/switch/select/radio/selects/checkbox/number/float/datetime/date/image/images/file/files/weigh；
