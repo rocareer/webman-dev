@@ -40,13 +40,14 @@ class AuditProject extends Backend
     public function index(): Response
     {
         list($where, $alias, $limit, $order) = $this->queryBuilder();
-        $res = $this->model
+        $query = $this->model
             ->from($this->queryFromTable($alias))
             ->where(function ($query) use ($where) {
                 $this->applyWhereArray($query, $where);
-            })
-            ->paginate($limit);
-        $this->applyOrderBy($res, $order);
+            });
+        // 排序必须先于 paginate 应用（LengthAwarePaginator 无 orderBy；与 trait queryList 顺序一致）
+        $this->applyOrderBy($query, $order);
+        $res = $query->paginate($limit);
         $items = [];
         foreach ($res->items() as $row) {
             $item = $row->toArray();

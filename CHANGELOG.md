@@ -1,3 +1,12 @@
+## [v3.15.5] - 2026-09-07
+
+### 修复：audit 项目/规则列表排序时 500（生成器 index 顺序缺陷同款）
+
+- `audit/AuditProject::index`、`audit/AuditRule::index` 原先 `paginate()` 后
+  `applyOrderBy($res)` ——LengthAwarePaginator 无 orderBy 方法，点击列排序即
+  500；改排序先于 paginate 应用（与 radmin trait queryList 顺序一致；radmin
+  v5.2.2 同步修复生成器 index.stub 源头）
+
 ## [v3.15.4] - 2026-09-07
 
 ### 修复：dev「开发和调试」目录兜底权重 82 → -1（对齐 radmin v5.1.4 垫底）
