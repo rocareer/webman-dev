@@ -91,12 +91,31 @@ class CrudDesigner
 
         // ---- 1. 字段解析 ----
         $fields = [];
-        $hasPk = false;
+        $seenNames = [];
+        $warnings = [];
         foreach ($design['fields'] as $i => $f) {
-            $fields[] = $this->parseField($f, $i + 1, $hasPk);
+            $parsed = $this->parseField($f, $i + 1);
+            if (isset($seenNames[$parsed['name']])) {
+                throw new InvalidArgumentException("字段名重复：{$parsed['name']}（第 {$i} 个字段与前面字段同名）");
+            }
+            $seenNames[$parsed['name']] = true;
+            // select/radio/checkbox/selects 需 comment 字典（标题: 键=值,...）驱动选项
+            if (in_array($parsed['designType'], ['select', 'radio', 'checkbox', 'selects'], true)
+                && strpos($parsed['comment'], '=') === false) {
+                $warnings[] = "字段 {$parsed['name']} 的 comment 未带字典（如「状态: 0=禁用,1=启用」），页面选项为空，需后续在 popupForm.vue 补 options";
+            }
+            $fields[] = $parsed;
         }
-        // 自动补 id 主键（惯例：bigint unsigned identity）
-        if (!$hasPk) {
+        // 主键：全家桶模型按 id 主键设计（引擎 getKeyName=id），仅支持 id 主键；
+        // 用户未声明 id 字段时自动注入（bigint unsigned identity）
+        $hasId = false;
+        foreach ($fields as $f) {
+            if ($f['name'] === 'id') {
+                $hasId = true;
+                break;
+            }
+        }
+        if (!$hasId) {
             array_unshift($fields, [
                 'name' => 'id', 'comment' => 'ID', 'designType' => 'pk',
                 'type' => 'bigint', 'length' => 20, 'precision' => 0,
@@ -173,13 +192,17 @@ class CrudDesigner
             'menu_name' => $menuName,
             'table_name' => $name,
             'module' => '',
+            'warnings' => $warnings,
         ];
     }
 
     /**
      * 解析单个字段（简化键 -> 引擎 payload 全键）
+     *
+     * 主键约束：全家桶模型/控制器按 id 主键设计（Eloquent getKeyName=id），
+     * 故仅允许 id 作为主键——字段名 id 自动提升为主键；primary_key=true 且非 id 报错。
      */
-    protected function parseField(array $f, int $index, bool &$hasPk): array
+    protected function parseField(array $f, int $index): array
     {
         $name = strtolower(trim((string) ($f['name'] ?? '')));
         $comment = trim((string) ($f['comment'] ?? ''));
@@ -312,16 +335,18 @@ class CrudDesigner
                 $field['defaultType'] = 'NONE';
             }
         }
-        // 显式主键（如已有主键再标记则报错）
-        if (!empty($f['primary_key'])) {
-            if ($hasPk) {
-                throw new InvalidArgumentException("字段 {$name}：主键只能有一个（id 或显式 primary_key）");
-            }
-            $hasPk = true;
+        // 主键：仅支持 id（见方法头注释）——id 自动主键；显式 primary_key 非 id 报错
+        $primaryKey = $name === 'id' ? true : (!empty($f['primary_key']) ? throw new InvalidArgumentException(
+            "字段 {$name}：自定义主键暂不支持（引擎按 id 主键设计，主键固定为 id bigint identity；如确需业务主键请在迁移后自行调整）"
+        ) : false);
+        if ($primaryKey) {
             $field['primaryKey'] = true;
             $field['null'] = false;
             $field['autoIncrement'] = true;
             $field['unsigned'] = true;
+            // id 主键类型固定 bigint（全家桶模型/序列惯例；用户显式声明的 id 同样强制）
+            $field['type'] = 'bigint';
+            $field['length'] = 20;
             if ($field['defaultType'] === 'INPUT') {
                 // 主键不允许默认值
                 $field['default'] = '';
@@ -424,6 +449,16 @@ class CrudDesigner
         $className = self::camel($table) . 'Crud';
         $commentSafe = str_replace(['*/', '/*', '<?', '?>', '`'], '', $comment);
         $commentSafe = trim(preg_replace('/[\r\n\t]+/', ' ', $commentSafe));
+        // PHP 单引号字面量转义（表 comment 会进入 'comment' => '...'，防引号/反斜杠断语法）
+        $phpComment = addslashes($commentSafe);
+        // 主键名动态化（固定 id，防御性推导）
+        $pk = 'id';
+        foreach ($fields as $f) {
+            if (!empty($f['primaryKey'])) {
+                $pk = $f['name'];
+                break;
+            }
+        }
 
         $lines = [];
         $lines[] = '<?php';
@@ -445,7 +480,7 @@ class CrudDesigner
         $lines[] = '            return;';
         $lines[] = '        }';
         $lines[] = '        $table = $this->table($name, [';
-        $lines[] = "            'id' => false, 'comment' => '{$commentSafe}', 'primary_key' => 'id',";
+        $lines[] = "            'id' => false, 'comment' => '{$phpComment}', 'primary_key' => '{$pk}'";
         $lines[] = '        ]);';
         foreach ($fields as $f) {
             $lines[] = '        $table->addColumn(' . $this->renderAddColumn($f) . ');';
@@ -564,6 +599,31 @@ class CrudDesigner
             }
         }
         return '[' . implode(', ', $parts) . ']';
+    }
+
+    /**
+     * 预期落盘目标文件（相对宿主根；路径按引擎惯例：表名下划线=目录层级）
+     *
+     * 控制器/模型/验证器/前端 views/lang 与引擎 parseNameData 推导一致，
+     * CLI/MCP 冲突预检与摘要共用，防重复生成覆盖已改代码。
+     */
+    public static function targetFiles(string $tableName): array
+    {
+        $path = str_replace('_', '/', $tableName);  // cc_student -> cc/student
+        $parts = explode('/', $path);
+        $uc = self::camel((string) array_pop($parts));
+        $dir = implode('/', $parts);
+        $prefix = $dir !== '' ? $dir . '/' : '';
+        return [
+            "app/admin/controller/{$prefix}{$uc}.php",
+            "app/admin/model/{$prefix}{$uc}.php",
+            "app/admin/validate/{$prefix}{$uc}.php",
+            "web/src/views/backend/{$path}/index.vue",
+            "web/src/views/backend/{$path}/popupForm.vue",
+            // 语言包目录层级：backend/zh-cn|en/ + 表名路径（实证：web/src/lang/backend/zh-cn/demo/student.ts）
+            "web/src/lang/backend/zh-cn/{$path}.ts",
+            "web/src/lang/backend/en/{$path}.ts",
+        ];
     }
 
     /**

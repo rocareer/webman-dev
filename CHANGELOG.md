@@ -1,3 +1,21 @@
+## [v3.15.3] - 2026-09-07
+
+### 加固：make-crud/crud_generate 深度健壮性（主键语义/注入安全/冲突保护/错误可读）
+
+- **主键语义定版**：仅支持 id 主键（全家桶模型/控制器按 Eloquent getKeyName=id 设计）——
+  用户显式声明 id 字段时强制提升为 bigint identity 主键（不再重复注入双 id）；显式
+  primary_key 非 id 直接报错提示（此前会生成无序列主键/双 id 列致建表失败）
+- **注入安全**：迁移渲染表 comment 进 PHP 单引号字面量前 addslashes（含 ' \ 时断语法）；
+  primary_key 动态取实际主键名（防御性，不再硬编码 'id'）；字段重名显式拦截
+- **lang 路径层级修正**：targetFiles 语言包路径对齐引擎实际落点（web/src/lang/backend/zh-cn/{path}.ts）
+  ——冲突预检此前漏检 lang 文件（重生成会覆盖已改语言包）
+- **冲突预检前置 + MCP force 参数**：CLI/MCP 均先查目标文件（controller/model/validate/
+  views/lang 7 件套）再落盘（失败零残留）；MCP 缺省保护（force=true 覆盖），与 CLI 对齐
+- **MCP 错误可读**：设计不合法/冲突返回 TOOL_VALIDATION_ERROR + 可读 display_message
+  （此前抛异常被 McpRegistry 归一为无消息 INTERNAL_ERROR）；inputSchema 移除误导性 primary_key
+- **warnings 提示**：select/radio/checkbox/selects 字段 comment 缺字典（页面选项空）时
+  CLI/MCP 输出黄色提示（非阻断）；提取 CrudDesigner::targetFiles 供三通道同源探测
+
 ## [v3.15.2] - 2026-09-07
 
 ### 修复：表名目录语义对齐引擎 + 迁移复用 + 冲突探测同源（make-crud/MCP 定版行为）

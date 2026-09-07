@@ -98,7 +98,17 @@ JSON;
         $base = $this->basePath();
         $noMigration = (bool) $input->getOption('no-migration');
 
-        // 1) 幂等迁移文件落盘（默认；同名表迁移已存在则复用提示，不重复写）
+        // 1) 目标文件冲突预检（防覆盖已改代码；--force 跳过）——先于写迁移，失败零落盘
+        if (!$input->getOption('force')) {
+            $conflicts = $this->detectConflicts($base, $parsed);
+            if ($conflicts) {
+                $io->error('以下文件已存在（已生成过？用 --force 覆盖，或换表名/删旧 CRUD 记录）：');
+                $io->listing($conflicts);
+                return self::FAILURE;
+            }
+        }
+
+        // 2) 幂等迁移文件落盘（默认；同名表迁移已存在则复用提示，不重复写）
         $migrationFile = '';
         if (!$noMigration) {
             $migrationDir = $base . '/database/migrations';
@@ -112,22 +122,14 @@ JSON;
             }
         }
 
-        // 2) 目标文件冲突预检（controller/model/validate/web 落点由引擎推导，先探测）
-        if (!$input->getOption('force')) {
-            $conflicts = $this->detectConflicts($base, $parsed);
-            if ($conflicts) {
-                $io->error('以下文件已存在（已生成过？用 --force 覆盖，或换表名/删旧 CRUD 记录）：');
-                $io->listing($conflicts);
-                if ($migrationFile !== '') {
-                    unlink($migrationFile);
-                }
-                return self::FAILURE;
-            }
-        }
-
         // 3) 引擎生成（type=update：表已存在（迁移建）则不动表只出代码；表不存在则由引擎按设计建表兜底）
         $io->text('调用 CRUD 引擎生成（radmin CrudService）……');
         $result = (new \app\admin\service\CrudService())->generate('update', $parsed['table'], $parsed['fields']);
+
+        // 设计提示（字典缺失等，非阻断）
+        foreach ($parsed['warnings'] ?? [] as $warn) {
+            $io->warning($warn);
+        }
 
         // 4) 摘要
         $io->success('标准模块生成完成');
@@ -146,27 +148,12 @@ JSON;
     }
 
     /**
-     * 探测目标文件冲突（控制器/模型/验证器/前端 views/lang；路径按引擎惯例：表名下划线=目录层级）
+     * 探测目标文件冲突（复用 CrudDesigner::targetFiles 同源推导）
      */
     protected function detectConflicts(string $base, array $parsed): array
     {
-        $name = $parsed['table_name'];
-        $path = str_replace('_', '/', $name);      // demo/student
-        $parts = explode('/', $path);
-        $uc = CrudDesigner::camel((string) array_pop($parts));
-        $dir = implode('/', $parts);
-        $prefix = $dir !== '' ? $dir . '/' : '';
         $conflicts = [];
-        $candidates = [
-            "app/admin/controller/{$prefix}{$uc}.php",
-            "app/admin/model/{$prefix}{$uc}.php",
-            "app/admin/validate/{$prefix}{$uc}.php",
-            "web/src/views/backend/{$path}/index.vue",
-            "web/src/views/backend/{$path}/popupForm.vue",
-            "web/src/lang/backend/{$path}/zh-cn.ts",
-            "web/src/lang/backend/{$path}/en.ts",
-        ];
-        foreach ($candidates as $file) {
+        foreach (CrudDesigner::targetFiles($parsed['table_name']) as $file) {
             if (is_file($base . '/' . $file)) {
                 $conflicts[] = $file;
             }

@@ -3,9 +3,12 @@
 namespace app\mcp\collection;
 
 use app\admin\service\CrudService;
+use app\mcp\support\McpError;
 use app\mcp\support\McpRegistry;
 use app\mcp\support\McpToolCollectionInterface;
 use Rocareer\WebmanDev\support\CrudDesigner;
+use InvalidArgumentException;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -71,11 +74,11 @@ class CrudCollection implements McpToolCollectionInterface
                                     'length' => ['type' => 'integer', 'description' => '长度（varchar 缺省 255 / int 缺省 10 / decimal 总长）'],
                                     'required' => ['type' => 'boolean', 'description' => 'NOT NULL（缺省 false）'],
                                     'default' => ['type' => 'string', 'description' => '默认值（switch 缺省 0、weigh 缺省 0）'],
-                                    'primary_key' => ['type' => 'boolean', 'description' => '设为主键（缺省自动加 id bigint 主键）'],
                                 ],
                             ],
                         ],
                         'no_migration' => ['type' => 'boolean', 'description' => '跳过迁移文件（表已自行准备）'],
+                        'force' => ['type' => 'boolean', 'description' => '目标代码文件已存在时仍覆盖（缺省 false 保护已改代码，冲突即报错）'],
                     ],
                 ],
             ],
@@ -93,9 +96,28 @@ class CrudCollection implements McpToolCollectionInterface
 
         // 引擎可用性（radmin v5.1.0+）
         if (!class_exists(CrudService::class)) {
-            throw new \RuntimeException('宿主 rocareer/radmin 版本过低：CRUD 引擎 CrudService 不存在（需 v5.1.0+，先升级 radmin 再调用）');
+            throw new RuntimeException('宿主 rocareer/radmin 版本过低：CRUD 引擎 CrudService 不存在（需 v5.1.0+，先升级 radmin 再调用）');
         }
 
+        try {
+            return $this->doGenerate($arguments);
+        } catch (InvalidArgumentException $e) {
+            // 设计/参数不合法：返回校验错误（可读文案），不落任何文件
+            return $this->fail(McpError::VALIDATION_ERROR, $e->getMessage());
+        } catch (RuntimeException $e) {
+            // 业务拒绝（冲突/环境）：返回校验错误（可读文案）
+            return $this->fail(McpError::VALIDATION_ERROR, $e->getMessage());
+        } catch (Throwable $e) {
+            // 引擎等未知异常：内部错误（详细原因进 Radmin 日志，McpRegistry 已记）
+            return $this->fail(McpError::INTERNAL_ERROR, '生成执行失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 执行生成主流程（校验/冲突/迁移/引擎；异常上抛由 call() 分类归一）
+     */
+    protected function doGenerate(array $arguments): array
+    {
         $tableName = strtolower(trim((string) ($arguments['table_name'] ?? '')));
         $tableComment = trim((string) ($arguments['table_comment'] ?? ''));
         $quickSearch = array_values(array_filter(array_map('strval', (array) ($arguments['quick_search'] ?? [])), 'strlen'));
@@ -131,10 +153,25 @@ class CrudCollection implements McpToolCollectionInterface
             throw new \InvalidArgumentException('设计不合法：' . $e->getMessage(), 0, $e);
         }
 
+        // 冲突预检（防覆盖已改代码；force=true 跳过）——先于写迁移，失败零落盘
+        $base = $this->basePath();
+        $force = (bool) ($arguments['force'] ?? false);
+        if (!$force) {
+            $conflicts = [];
+            foreach (CrudDesigner::targetFiles($parsed['table_name']) as $file) {
+                if (is_file($base . '/' . $file)) {
+                    $conflicts[] = $file;
+                }
+            }
+            if ($conflicts) {
+                throw new \RuntimeException('目标文件已存在（已生成过/已改代码）：' . implode(', ', $conflicts)
+                    . '——如需覆盖重生成请传 force=true；或先删除旧文件/后台 CRUD 记录');
+            }
+        }
+
         // 1) 迁移文件落盘（默认；同名表迁移已存在则复用，不重复写）
         $migrationFile = '';
         if (!$noMigration) {
-            $base = $this->basePath();
             $existing = glob($base . '/database/migrations/*_' . $parsed['table_name'] . '_crud.php');
             if (!$existing) {
                 $migrationFile = $base . '/database/migrations/' . $parsed['ts'] . '_' . $parsed['table_name'] . '_crud.php';
@@ -149,6 +186,9 @@ class CrudCollection implements McpToolCollectionInterface
         $lines = [];
         $lines[] = '标准 CRUD 模块生成完成';
         $lines[] = '----------';
+        foreach ($parsed['warnings'] ?? [] as $warn) {
+            $lines[] = '注意：' . $warn;
+        }
         $lines[] = '表：' . $parsed['table_name'] . '（' . $parsed['table']['comment'] . '）';
         if ($migrationFile !== '') {
             $lines[] = '迁移：' . str_replace($this->basePath() . '/', '', $migrationFile);
@@ -173,24 +213,11 @@ class CrudCollection implements McpToolCollectionInterface
     }
 
     /**
-     * 预期生成文件清单（摘要用；目录按引擎惯例：表名下划线=目录层级）
+     * 预期生成文件清单（摘要用；与 CrudDesigner::targetFiles 同源，路径按引擎惯例）
      */
     protected function generatedFiles(array $parsed): array
     {
-        $name = $parsed['table_name'];
-        $path = str_replace('_', '/', $name);
-        $parts = explode('/', $path);
-        $uc = CrudDesigner::camel((string) array_pop($parts));
-        $dir = implode('/', $parts);
-        $files = [];
-        $files[] = 'app/admin/controller/' . ($dir !== '' ? $dir . '/' : '') . $uc . '.php';
-        $files[] = 'app/admin/model/' . ($dir !== '' ? $dir . '/' : '') . $uc . '.php';
-        $files[] = 'app/admin/validate/' . ($dir !== '' ? $dir . '/' : '') . $uc . '.php';
-        $files[] = "web/src/views/backend/{$path}/index.vue";
-        $files[] = "web/src/views/backend/{$path}/popupForm.vue";
-        $langPrefix = str_replace('_', '/', $name);
-        $files[] = "web/src/lang/backend/{$langPrefix}/zh-cn.ts";
-        return $files;
+        return CrudDesigner::targetFiles($parsed['table_name']);
     }
 
     /**
@@ -210,6 +237,18 @@ class CrudCollection implements McpToolCollectionInterface
             mkdir(dirname($path), 0755, true);
         }
         file_put_contents($path, $content);
+    }
+
+    /**
+     * 业务失败返回（McpRegistry 约定：error_code + display_message 透传，result 带详情）
+     */
+    protected function fail(string $code, string $message): array
+    {
+        return [
+            'error_code' => $code,
+            'display_message' => mb_substr($message, 0, 60),
+            'result' => ['error' => true, 'error_code' => $code, 'message' => $message],
+        ];
     }
 
     /**
