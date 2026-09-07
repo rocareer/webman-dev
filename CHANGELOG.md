@@ -1,3 +1,9 @@
+## [v3.14.0] - 2026-09-07
+
+### 兼容（chore）：放宽 rocareer/radmin 依赖约束至 ^3.1 || ^4.0 || ^5.0
+
+- 配合 radmin v5.0.0（验证框架切换 webman/validation、think 生态彻底清零）联动升级；本包无功能改动。
+
 # Changelog
 
 ## [v3.13.1] - 2026-09-05
