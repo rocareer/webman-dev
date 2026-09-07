@@ -156,7 +156,7 @@ class RadminWebmanDevAuditPage extends AbstractMigration
             $this->table($table)->insert([
                 [
                     'pid' => 0, 'type' => 'menu_dir', 'title' => '开发和调试', 'name' => 'dev',
-                    'path' => 'dev', 'icon' => 'fa fa-terminal', 'status' => '1', 'weigh' => 82,
+                    'path' => 'dev', 'icon' => 'fa fa-terminal', 'status' => '1', 'weigh' => -1,
                     'create_time' => $now, 'update_time' => $now,
                 ],
             ])->saveData();
