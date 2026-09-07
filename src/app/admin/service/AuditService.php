@@ -1295,6 +1295,10 @@ class AuditService
             'use think\\Facade',
             'think\\facade\\Validate',
             'think\\exception\\ValidateException',
+            // 场景设置器残留：radmin BaseValidate 已无 scene() 设置器（官方基类 scene() 为 getter），
+            // 变量/字面形态调用会落 __call → "Validator method not found: scene"（合法内部调用 $this->scene() 无参不匹配）
+            '->scene(\'',
+            '->scene($',
             // support\think\* 门面（webman/think-orm 专属路径，Eloquent 下类不存在）
             'support\\think\\',
             "config('think-orm",

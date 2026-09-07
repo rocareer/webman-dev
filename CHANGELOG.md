@@ -1,3 +1,11 @@
+## [v3.14.2] - 2026-09-07
+
+### 修复（audit）：think 残留门禁补 scene 设置器残留拦截
+
+- orm_migrated 新增 `->scene('` 与 `->scene($` 模式（radmin BaseValidate 已无 scene() 设置器，
+  残留调用落官方 __call → "Validator method not found: scene" 运行期崩；v5.0.1 只修字面形态，
+  user/Index 变量形态漏网致前台登录全挂，本轮补门禁防再漏；内部合法 getter `$this->scene()` 无参不匹配）
+
 ## [v3.14.1] - 2026-09-07
 
 ### 修复（audit）：think 残留门禁全收口（随 radmin v5.0.0 联动）
