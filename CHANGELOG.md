@@ -1,3 +1,20 @@
+## [v3.15.0] - 2026-09-07
+
+### 新增：rocareer:make-crud + MCP crud_generate（标准 CRUD 模块生成，复用 radmin v5.1.0 引擎）
+
+- **rocareer:make-crud 命令**：简化表设计 JSON（字段键极简，字典编码在 comment）-> 渲染 PG 幂等
+  迁移文件（database/migrations/<ts>_<table>_crud.php，hasTable 守卫可 migrate:run 追溯）
+  + 调 radmin `app\admin\service\CrudService`（v5.1.0 抽取，与后台 /admin/crud 同一引擎）生成
+  控制器/模型/验证器 + 前端 index.vue/popupForm.vue + 语言包 + 菜单（幂等种入）；主键 id 与
+  create_time/update_time 自动注入；模块段 table.module 自定义代码落点；冲突预检（--force 覆盖）
+- **MCP crud_generate 工具**：新集合 CrudCollection（key=crud，子端点 /mcp/crud），参数平铺
+  （table_name/table_comment/module/quick_search/fields/no_migration），event.php 同事件双监听注册；
+  AI 客户端可直调生成标准模块（与 CLI 同一 CrudDesigner + CrudService）
+- **config 真源回归**：command.php/app.php 补回包源码 config/plugin/rocareer/webman-dev/
+  （历史仅存宿主侧，新装宿主缺命令注册），随 Install pathRelation 自动落盘
+- 依赖：radmin v5.1.0+（CrudService；class_exists 守卫给出升级提示）；design_type 白名单
+  input/textarea/editor/switch/select/radio/selects/checkbox/number/float/datetime/date/image/images/file/files/weigh
+
 ## [v3.14.2] - 2026-09-07
 
 ### 修复（audit）：think 残留门禁补 scene 设置器残留拦截

@@ -1,6 +1,6 @@
 # rocareer/webman-dev
 
-Radmin 全家桶开发工具包：代码规范审计 + 插件脚手架 +「工程质量审计」后台管理页。
+Radmin 全家桶开发工具包：代码规范审计 + 插件脚手架 + 标准 CRUD 模块生成（复用后台 /admin/crud 引擎）+「工程质量审计」后台管理页。
 
 ## 安装
 
@@ -45,3 +45,41 @@ baTable 体系页面必须经 baTable、弹窗提交走 onSubmit；radmin 同步
     php webman rocareer:make-plugin dev --title=演示 --description="..." [--out=/tmp/dev]
 
 生成标准插件骨架后按提示接入 dev 即可。
+
+## 命令：rocareer:make-crud — 标准 CRUD 模块生成（AI 友好）
+
+    php webman rocareer:make-crud --demo                          # 打印简化设计 JSON 示例
+    php webman rocareer:make-crud --design=/path/design.json      # 按设计 JSON 生成模块
+
+设计 JSON 极简（字段键：name/comment/design_type/length/required/default/primary_key；
+字典编码在 comment：`状态: 0=禁用,1=启用`）：
+
+```json
+{
+  "table": { "name": "cc_student", "comment": "学员管理", "module": "cc", "quick_search": ["name"] },
+  "fields": [
+    { "name": "name", "comment": "姓名", "design_type": "input", "length": 50, "required": true },
+    { "name": "status", "comment": "状态: 0=禁用,1=启用", "design_type": "switch", "default": "1" },
+    { "name": "remark", "comment": "备注", "design_type": "textarea" }
+  ]
+}
+```
+
+流程：渲染 PG 幂等迁移（`database/migrations/<ts>_<table>_crud.php`，hasTable 守卫可 migrate:run 追溯）
+→ 调 radmin `app\admin\service\CrudService`（v5.1.0+，与后台 /admin/crud 同一引擎）生成
+控制器/模型/验证器 + 前端 index.vue/popupForm.vue + 语言包 + 菜单（幂等）；主键/时间戳列自动注入；
+菜单即时幂等种入（不写进迁移）。生成目标 = 运行命令的宿主工程（app/ 与 web/src/）。
+
+- 依赖：宿主需 radmin v5.1.0+（引擎服务化后）；表结构真源 = 迁移文件，请执行 `php webman migrate:run` 建表
+- 冲突保护：目标文件已存在默认中止（重复生成需 --force 覆盖，或后台 CRUD 记录删除后重生成）
+- 选项：`--no-migration`（表已自行准备）、`--force`、`--demo`
+
+## MCP crud_generate 工具（自动注册）
+
+同上 MCP 集合机制，本包自动注册 **crud_generate**（集合 key=`crud`，子端点 `/mcp/crud`）：
+
+- 参数平铺：`table_name` / `table_comment` / `module` / `quick_search` / `fields`（嵌套对象数组）/ `no_migration`；
+- 与 CLI `rocareer:make-crud`、后台 `/admin/crud` 共用同一引擎（CrudService + CrudDesigner），AI 客户端
+（DSH / Claude Desktop / agent）可直接「给字段设计 → 拿标准模块」；字段白名单：
+  input/textarea/editor/switch/select/radio/selects/checkbox/number/float/datetime/date/image/images/file/files/weigh；
+- 引擎依赖 radmin v5.1.0+，缺失时报错提示升级。
