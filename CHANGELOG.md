@@ -1,3 +1,12 @@
+## [v3.14.1] - 2026-09-07
+
+### 修复（audit）：think 残留门禁全收口（随 radmin v5.0.0 联动）
+
+- orm_migrated 规则升级为「think 生态残留门禁」：新增禁止 use think\Validate / use think\Facade /
+  think\facade\Validate / think\exception\ValidateException 引用（think-validate/think-container 类
+  已随 radmin v5.0.0 移除，残留即崩）；描述移除 think-validate/think-helper/think-container 白名单
+- composer 检查泛化为 topthink/* 禁装（替代仅 webman/think-orm）
+
 ## [v3.14.0] - 2026-09-07
 
 ### 兼容（chore）：放宽 rocareer/radmin 依赖约束至 ^3.1 || ^4.0 || ^5.0

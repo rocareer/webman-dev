@@ -33,7 +33,7 @@ class AuditService
         'cross_copy' => ['title' => '跨包文件重复', 'description' => '不同包内容逐字节相同的 .php 文件 = 复制粘贴实现（应下沉共享，防接口漂移）'],
         'dto_contract' => ['title' => 'DTO 分层规范', 'description' => 'DTO 分层门禁：公开 API 控制器（非 admin）手拼多字段数组输出 = 契约未固化，应引入 app/<模块>/dto/ typed DTO 或 Model accessor；dto/ 目录内纯搬运类（toArray 原样返回入参、无整形/强转/脱敏）= 过度设计，直接用数组；目录命名用 dto 不用 data（data 与"数据/数据库"歧义）；文件标注 @audit-ignore dto_contract 显式豁免'],
         'llm_gate' => ['title' => '全域 LLM 门禁（智能体出口）', 'description' => '全域 LLM 业务必须经 agent 包 AgentGateway（无智能体不开工）：业务代码禁止直接实例化 AiRouterService 调用 LLM/向量化；ai（底层提供者）与 agent（网关）豁免；文件标注 @audit-ignore llm_gate 显式豁免（如 ai 调试/开放 API 运维接口）'],
-        'orm_migrated' => ['title' => 'ORM 迁移门禁（think-orm 残留）', 'description' => 'ORM 迁移门禁：src 内禁止 think-orm 类引用（think\facade\Db / think\db\exception / think\model\relation / think\Paginator / think\File / think\Exception）与 config(\'think-orm...\') 调用、composer 依赖 webman/think-orm；白名单保留 think-validate / think-helper / think-container 类；文件标注 @audit-ignore orm_migrated 显式豁免'],
+        'orm_migrated' => ['title' => 'think 生态残留门禁（think-orm + think-validate 等清零）', 'description' => 'think 生态残留门禁：src 内禁止任何 think 类引用（think\facade\Db / think\db\exception / think\model\relation / think\Validate / think\Facade / think\exception\ValidateException / think\Paginator / think\File / think\Exception）与 config(\'think-orm...\') 调用、composer 依赖 webman/think-orm 或 topthink/*（v5.0.0 起验证框架已切 webman/validation，think-validate/think-container 白名单随 radmin v5.0.0 移除）；文件标注 @audit-ignore orm_migrated 显式豁免'],
         'event_standard' => ['title' => '事件规范（webman/event）', 'description' => 'webman/event 使用规范门禁（见 docs/webman-event-standard.md）：事件发射一律用 Event::dispatch（不吞异常，监听器异常上抛），禁止 Event::emit（吞异常掩盖监听器故障）；事件名必须 <提供方>.<领域>.<动作> 全小写点分（禁驼峰/连字符/下划线分隔/无前缀裸名）；业务代码禁止散落 Event::on()（监听器集中 config/plugin/*/event.php 或 config/event.php 声明，唯一例外 radmin EventRegister 内置 member.*）；静态事件名应在本包/跨包/宿主有对应监听器（孤儿事件=发射即空转，纯日志应直写日志）；app/listener 监听器方法签名 (array $data): void + 自身 try/catch；文件标注 @audit-ignore event_standard 显式豁免'],
         'common_utils' => ['title' => '通用工具真源门禁（禁止重复造轮子）', 'description' => '通用工具真源门禁（见 docs/common-utils-registry.md）：已知手写重复模式必须用 radmin 全局函数——max(1, min(100 → clamp_limit、分页 max(1, (int) → clamp_page、keyword/quickSearch 兼容链 → request_keyword、where 闭包多字段 like → keyword_like、json_encode(UNICODE|SLASHES) → json_unicode、strtr(base64_encode → base64url_encode、md5(uniqid → uuid7、固定四星掩码 → mask_secret；真源定义文件（radmin functions.php）与审计引擎自身源文件豁免；文件标注 @audit-ignore common_utils 显式豁免'],
         'install_standard' => ['title' => 'Install.php 标准化', 'description' => 'Install.php 标准化门禁（见 docs/install-standard.md）：WEBMAN_PLUGIN 常量、install/update/uninstall 三钩子齐全、install 签名兼容官方 Install::install(true)（禁强类型参数）、禁官方骨架残留 copy_dir/remove_dir（显式 overwrite=true 的 copy_dir 除外）与 array() 语法、类前中文头注释；文件标注 @audit-ignore install_standard 显式豁免'],
@@ -1281,7 +1281,7 @@ class AuditService
         if (!is_dir("$dir/src")) {
             return null;
         }
-        // think-orm 残留模式（白名单之外）；webman-dev 自身种子迁移/CLI 工具里历史文件
+        // think-orm 残留模式；webman-dev 自身种子迁移/CLI 工具里历史文件
         // 用 @audit-ignore orm_migrated 豁免
         $forbidden = [
             'think\\facade\\Db',
@@ -1290,6 +1290,11 @@ class AuditService
             'think\\Paginator',
             'use think\\File;',
             'use think\\Exception;',
+            // think-validate / think-container 残留（radmin v5.0.0 起验证框架切 webman/validation，类不存在即崩）
+            'use think\\Validate',
+            'use think\\Facade',
+            'think\\facade\\Validate',
+            'think\\exception\\ValidateException',
             // support\think\* 门面（webman/think-orm 专属路径，Eloquent 下类不存在）
             'support\\think\\',
             "config('think-orm",
@@ -1385,10 +1390,13 @@ class AuditService
             }
         }
         $composer = $dir . '/composer.json';
-        if (is_file($composer) && str_contains((string) file_get_contents($composer), 'webman/think-orm')) {
+        $composerContent = is_file($composer) ? (string) file_get_contents($composer) : '';
+        if ($composerContent !== '' && str_contains($composerContent, 'topthink/')) {
+            $issues[] = 'composer.json: topthink/* 残留（think 生态已清零，radmin v5.0.0 起禁装）';
+        } elseif ($composerContent !== '' && str_contains($composerContent, 'webman/think-orm')) {
             $issues[] = 'composer.json: webman/think-orm';
         }
-        return ['issues' => $issues, 'note' => 'think-orm 残留清零'];
+        return ['issues' => $issues, 'note' => 'think 生态残留清零（think-orm + think-validate 等）'];
     }
 
     /* ---------- 15. 事件规范（webman/event） ---------- */
