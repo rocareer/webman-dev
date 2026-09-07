@@ -245,7 +245,8 @@ class CrudDesigner
                 $field['type'] = 'text';
                 break;
             case 'switch':
-                $field['type'] = 'tinyint';
+                // int 0/1（勿用 tinyint：radmin 引擎 default='1'+tinyint 会落 PG boolean，与迁移/字典 0/1 分叉）
+                $field['type'] = 'int';
                 $field['unsigned'] = true;
                 $field['null'] = false;
                 $field['defaultType'] = 'INPUT';
@@ -537,7 +538,7 @@ class CrudDesigner
                 $opts += ['null' => true];
                 break;
             case $f['type'] === 'tinyint':
-                // PG 无 tinyint：integer 兜底（switch 布尔语义用 0/1）
+                // 兼容历史（switch 已统一 int；tinyint 落 integer）
                 $type = 'integer';
                 $opts += ['signed' => !$f['unsigned'], 'null' => false];
                 $opts['default'] = $f['defaultType'] === 'INPUT' ? (int) ($f['default'] === '' ? '0' : $f['default']) : 0;

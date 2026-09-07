@@ -1,3 +1,11 @@
+## [v3.15.1] - 2026-09-07
+
+### 修复：switch 字段类型 int 化（防 PG boolean 分叉，迁移与引擎 DDL 同构）
+
+- CrudDesigner switch 字段 type 由 tinyint 改 int：radmin 引擎 getPhinxFieldType 对
+  tinyint + default='1' 会落 PG boolean（true/false），而字典/渲染按 0/1 —— 列表状态列
+  显示空白；统一 int 后迁移渲染（integer 0/1）与引擎 DDL 兜底完全同构，全链路一致
+
 ## [v3.15.0] - 2026-09-07
 
 ### 新增：rocareer:make-crud + MCP crud_generate（标准 CRUD 模块生成，复用 radmin v5.1.0 引擎）
