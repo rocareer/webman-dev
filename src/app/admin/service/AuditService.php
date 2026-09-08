@@ -22,7 +22,7 @@ class AuditService
         'php_syntax' => ['title' => 'PHP 语法检查', 'description' => 'php -l 全量语法校验（批量子进程，单次调用）'],
         'controller' => ['title' => '控制器规范', 'description' => '继承 Backend、: Response 签名、initialize 调 parent::initialize()、public 方法返回类型'],
         'permission' => ['title' => '权限节点匹配', 'description' => '控制器方法 routePath 与迁移注册的按钮名比对：缺失/错名/孤儿按钮全部报出'],
-        'migration' => ['title' => '迁移时间戳查重', 'description' => 'Phinx 迁移文件时间戳冲突（撞号会阻断全家桶 migrate:run）'],
+        'migration' => ['title' => '迁移时间戳查重', 'description' => '全工作区 migrations/pg-migrations 的 Phinx 时间戳冲突（撞号会阻断全家桶 migrate:run）'],
         'residue' => ['title' => '残留扫描', 'description' => 'CRUD 脚手架死代码（Test 控制器/模型/验证器）+ TODO/FIXME 计数'],
         'version' => ['title' => '版本同步', 'description' => 'CHANGELOG 头部版本 vs dev/full composer.json path 钉版'],
         'web_page' => ['title' => '前端页面规范', 'description' => 'Vue 页面模板一致性：禁止自创依赖注入/裸 axios//src/ 导入、baTable 体系页面必须经 baTable、弹窗提交走 onSubmit、TableHeader 顶部自定义按钮必须用标准样式类 table-header-operate（radmin 同步树跳过）'],
@@ -41,6 +41,12 @@ class AuditService
 
     /** 问题明细入库/返回上限（完整数量在 count） */
     public const MAX_ISSUES = 50;
+
+    /** 本轮工作区迁移扫描结果（避免每个包重复扫描） */
+    protected ?array $migrationScan = null;
+
+    /** 本轮已归属过迁移冲突的时间戳（避免全量审计重复报错） */
+    protected array $reportedMigrationStamps = [];
 
     /** 默认审计包列表（与 rocareer:audit 命令一致；MCP quality_audit 工具缺省使用） */
     public const DEFAULT_PACKAGES = [
@@ -121,6 +127,8 @@ class AuditService
      */
     public function audit(string $root, array $pkgs, array $codes = []): array
     {
+        $this->migrationScan = null;
+        $this->reportedMigrationStamps = [];
         $codes = $codes ?: array_keys(self::RULES);
         $skipMap = [
             'php_syntax' => '',
@@ -366,23 +374,57 @@ class AuditService
 
     /* ---------- 4. 迁移时间戳查重 ---------- */
 
-    protected function checkMigration(string $root, string $pkg, string $dir): ?array
+    protected function checkMigration(string $root, string $pkg, string $dir): array
     {
-        $migDir = "$dir/database/migrations";
-        if (!is_dir($migDir)) {
-            return null;
-        }
-        $seen = [];
-        $dups = [];
-        foreach (glob("$migDir/???????????????_*.php") ?: [] as $f) {
-            $stamp = substr(basename($f), 0, 14);
-            if (isset($seen[$stamp])) {
-                $dups[] = $stamp;
+        $scan = $this->workspaceMigrations($root);
+        $issues = [];
+        foreach ($scan['duplicates'] as $stamp => $files) {
+            if (isset($this->reportedMigrationStamps[$stamp]) || !$this->migrationBelongsToPackage($files, $dir)) {
+                continue;
             }
-            $seen[$stamp] = basename($f);
+            $this->reportedMigrationStamps[$stamp] = true;
+            $issues[] = "duplicate timestamp $stamp: " . implode(', ', $files);
         }
-        $issues = array_map(fn($t) => "duplicate timestamp $t", array_unique($dups));
-        return ['issues' => $issues, 'note' => count($seen) . ' files'];
+        return ['issues' => $issues, 'note' => $scan['count'] . ' workspace files'];
+    }
+
+    /**
+     * 扫描工作区全部 Phinx 迁移（业务 migrations + 向量 pg-migrations）
+     */
+    protected function workspaceMigrations(string $root): array
+    {
+        if ($this->migrationScan !== null) {
+            return $this->migrationScan;
+        }
+        $groups = [];
+        foreach (['migrations', 'pg-migrations'] as $set) {
+            foreach (glob("$root/*/database/$set/*.php") ?: [] as $file) {
+                if (!preg_match('/^(\d{14})_[a-z][a-z\d]*(?:_[a-z\d]+)*\.php$/i', basename($file), $match)) {
+                    continue;
+                }
+                $groups[$match[1]][] = str_replace($root . '/', '', $file);
+            }
+        }
+        ksort($groups);
+        $duplicates = array_filter($groups, static fn(array $files): bool => count($files) > 1);
+        return $this->migrationScan = [
+            'count' => array_sum(array_map('count', $groups)),
+            'duplicates' => $duplicates,
+        ];
+    }
+
+    /**
+     * 冲突归属到本轮最先涉及的包，避免同一时间戳在全量审计中重复报错
+     */
+    protected function migrationBelongsToPackage(array $files, string $dir): bool
+    {
+        $package = basename($dir) . '/';
+        foreach ($files as $file) {
+            if (str_starts_with($file, $package)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /* ---------- 5. 残留扫描 ---------- */

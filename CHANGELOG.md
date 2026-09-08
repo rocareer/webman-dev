@@ -1,3 +1,16 @@
+## [v3.15.6] - 2026-09-09
+
+### 修复：migration 审计漏扫与跨包时间戳冲突假绿
+
+- 修正迁移文件匹配由误写的 15 位 glob 改为 14 位时间戳正则；此前标准
+  `YYYYMMDDHHMMSS_name.php` 全部漏扫，migration 规则始终显示 `0 files` 假绿。
+- 扫描范围由当前包单一 `database/migrations` 扩展为整个源码根下所有包的
+  `database/{migrations,pg-migrations}`，与 webman-migration `migrate:run --set=all`
+  的真实装载范围一致；按时间戳聚合并在所涉及包中只报告一次，兼容定向审计且避免刷屏。
+- 首次真实扫描即检出多组存量跨包撞号，证明此前门禁存在假绿；后续包组合进入
+  宿主前可由审计提前阻断。
+- 修正 composer.json 作者主页为空导致 `composer validate` schema 校验失败。
+
 ## [v3.15.5] - 2026-09-07
 
 ### 修复：audit 项目/规则列表排序时 500（生成器 index 顺序缺陷同款）
