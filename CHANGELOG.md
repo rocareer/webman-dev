@@ -1,3 +1,11 @@
+## [v3.17.1] - 2026-09-09
+
+### 修复：update_audit_migration_rule 全新库排序炸裂（阻断 fresh DB migrate:run）
+
+- 现象：该迁移版本号 20260909131325 小于建表迁移 radmin_webman_dev_audit_page（20261028 未来时间戳风格存量），全新库按版本号升序会先跑规则更新 → `relation "ra_radmin_dev_audit_rule" does not exist`，migrate:run 整体失败（super 建仓首迁踩中）。
+- 修复：up() 增加 hasTable 守卫，表未建直接跳过（规则行由建表迁移的种子逻辑负责）；已执行存量库 phinx log 已记录不会重跑，零影响。
+- 教训：依赖「未来时间戳风格存量表」的迁移必须自带 hasTable 守卫（新库排序 = 版本号升序，未来号 = 最后跑）。
+
 ## [v3.17.0] - 2026-09-09
 
 ### 增强：audit migration 规则升级「迁移命名与查重（精确到秒）」，与 webman-migration v2.4.0 运行时强检同口径

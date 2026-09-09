@@ -23,6 +23,12 @@ class UpdateAuditMigrationRule extends AbstractMigration
     {
         $prefix = getDbPrefix();
         $table = $prefix . 'radmin_dev_audit_rule';
+        // 守卫：本迁移版本号（20260909）小于建表迁移 radmin_webman_dev_audit_page（20261028 未来
+        // 时间戳风格），全新库按版本号排序会先跑本条——表未建时直接跳过（规则行由建表迁移的
+        // 种子逻辑负责），已执行过的存量库不受影响（phinx log 已记录，不会重跑）。
+        if (!$this->hasTable($table)) {
+            return;
+        }
         $now = time();
 
         $row = $this->fetchRow("SELECT id FROM {$table} WHERE name = 'migration' LIMIT 1");
