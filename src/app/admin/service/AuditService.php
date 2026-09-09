@@ -863,8 +863,9 @@ class AuditService
                         && str_contains($body, "'total' =>")
                         && str_contains($body, "'page' =>")
                         && str_contains($body, "'limit' =>");
-                    if ($pairs >= 2 && str_contains($body, "\n") && !$isPaginationEnvelope) {
-                        $ln = substr_count(substr($src, 0, $m[0][1]), "\n") + 1;
+                    $ln = substr_count(substr($src, 0, $m[0][1]), "\n") + 1;
+                    if ($pairs >= 2 && str_contains($body, "\n") && !$isPaginationEnvelope
+                        && $this->lineInPublicMethod($src, $ln)) {
                         $issues[] = "$rel:$ln: 公开 API 手拼 {$pairs} 字段数组输出（契约未固化）——应引入 app/<模块>/dto/ typed DTO 或 Model accessor";
                     }
                 }
@@ -878,8 +879,8 @@ class AuditService
                 if ($scan !== null) {
                     $body = substr($src, $literalStart + 1, $scan - $literalStart - 1);
                     $pairs = preg_match_all('~=>~', $body);
-                    if ($pairs >= 2 && str_contains($body, "\n")) {
-                        $ln = substr_count(substr($src, 0, $m[0][1]), "\n") + 1;
+                    $ln = substr_count(substr($src, 0, $m[0][1]), "\n") + 1;
+                    if ($pairs >= 2 && str_contains($body, "\n") && $this->lineInPublicMethod($src, $ln)) {
                         $issues[] = "$rel:$ln: 公开 API 列表项手拼 {$pairs} 字段数组（契约未固化）——应引入 app/<模块>/dto/ typed DTO 固化列表项形状";
                     }
                 }
@@ -912,6 +913,53 @@ class AuditService
         }
 
         return ['issues' => $issues, 'note' => $ctrlCount . ' public api controllers'];
+    }
+
+    /**
+     * 命中行是否位于 public 方法体内
+     *
+     * dto_contract 只约束对外契约（public 路由方法）；私有/保护方法内的协议转换
+     * 中间格式（如 ai Responses↔Chat 线格式互转）不是对外契约，DTO 化属过度设计。
+     * 归属判定：命中行属于「起始行 ≤ 命中行的最后一个函数」。
+     */
+    protected function lineInPublicMethod(string $src, int $line): bool
+    {
+        static $spanCache = [];
+        $key = md5($src);
+        if (!isset($spanCache[$key])) {
+            $funcs = [];
+            $tokens = token_get_all($src);
+            $n = count($tokens);
+            for ($i = 0; $i < $n; $i++) {
+                $t = $tokens[$i];
+                if (!is_array($t) || $t[0] !== T_FUNCTION) {
+                    continue;
+                }
+                $vis = 'public';
+                for ($k = $i - 1, $scan = 0; $k >= 0 && $scan < 8; $k--) {
+                    $pk = $tokens[$k];
+                    if (!is_array($pk) || in_array($pk[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                        continue;
+                    }
+                    $scan++;
+                    if (in_array($pk[0], [T_PRIVATE, T_PROTECTED], true)) {
+                        $vis = 'non-public';
+                        break;
+                    }
+                }
+                $funcs[] = ['line' => (int) $t[2], 'vis' => $vis];
+            }
+            $spanCache[$key] = $funcs;
+        }
+        $owner = null;
+        foreach ($spanCache[$key] as $f) {
+            if ($f['line'] <= $line) {
+                $owner = $f;
+            } else {
+                break;
+            }
+        }
+        return $owner !== null && $owner['vis'] === 'public';
     }
 
     /**
