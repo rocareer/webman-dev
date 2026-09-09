@@ -1,3 +1,24 @@
+## [v3.16.0] - 2026-09-09
+
+### 增强：审计引擎覆盖面与规则合理性修复（默认包全量 + 四项误报收敛）
+
+- **默认包清单补齐至全部 src/* 基础设施包**（+9：ai-client/asset-client/http/
+  infrastructure/knowledge-client/memory-client/happ-client/experiment/slides），
+  与 check-version-sync.sh 登记口径对齐，CLI/MCP/后台共用。
+- **migration 规则纳入 dev 宿主工程迁移目录**（dev/*/database/{migrations,
+  pg-migrations}）：Phinx 装载项目 + 包两类目录，「包 vs 宿主工程」撞号同样阻断
+  migrate:run（knowledge 20260908010000 与 cc-knowledge 工程迁移撞号实案）。
+- **controller 规则支持包内继承链解析**：extends 链最终到达 Backend 即合规
+  （radmin LedgerLog 抽象基类 -> Backend 先例），抽象基类整体豁免（无自身路由）；
+  permission 规则同步豁免抽象基类。
+- **permission 规则连字符等价归一**：webman 路由 kebab→驼峰方法等价
+  （memory/snapshot/session-detail 按钮 ≡ sessionDetail 方法），比对双向
+  小写+去连字符，消除 6 条误报。
+- **version 规则扫描全部 dev 宿主钉版**：OIDC/happ/experiment/slides 等专属
+  宿主钉版此前不可见（只读 dev/full → 误 SKIP），现按全部宿主收集比对。
+- **common_utils 规则限定适用域**：仅约束 require rocareer/radmin 的包——纯
+  PHP SDK（ai-client/http 等）不可能调用 radmin 全局函数，直接跳过。
+
 ## [v3.15.6] - 2026-09-09
 
 ### 修复：migration 审计漏扫与跨包时间戳冲突假绿

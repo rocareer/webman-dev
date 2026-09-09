@@ -48,11 +48,15 @@ class AuditService
     /** 本轮已归属过迁移冲突的时间戳（避免全量审计重复报错） */
     protected array $reportedMigrationStamps = [];
 
-    /** 默认审计包列表（与 rocareer:audit 命令一致；MCP quality_audit 工具缺省使用） */
+    /** 包内类名 -> 文件路径索引（extends 链解析用；按包目录缓存） */
+    protected array $classFileIndex = [];
+
+    /** 默认审计包列表（与 rocareer:audit 命令一致；MCP quality_audit 工具缺省使用；覆盖全部 src/* 基础设施包） */
     public const DEFAULT_PACKAGES = [
-        'radmin', 'ai', 'memory', 'chat', 'agent', 'knowledge', 'asset',
-        'OIDC', 'oidc-client', 'channel', 'channel-client', 'happ', 'webman-migration',
-        'crontab', 'tiktoken', 'mcp', 'webman-status-code', 'webman-dev',
+        'radmin', 'ai', 'ai-client', 'memory', 'memory-client', 'chat', 'agent', 'knowledge', 'knowledge-client',
+        'asset', 'asset-client', 'OIDC', 'oidc-client', 'channel', 'channel-client', 'happ', 'happ-client',
+        'http', 'infrastructure', 'webman-migration', 'crontab', 'tiktoken', 'mcp', 'webman-status-code',
+        'webman-dev', 'experiment', 'slides',
     ];
 
     /**
@@ -146,7 +150,7 @@ class AuditService
             'dto_contract' => 'no public api controllers',
             'llm_gate' => 'no src/app dir',
             'event_standard' => 'no src/app dir',
-            'common_utils' => 'no src dir',
+            'common_utils' => 'no src dir / no radmin dependency (pure SDK)',
             'install_standard' => 'no src/Install.php',
         ];
         $packages = [];
@@ -300,9 +304,13 @@ class AuditService
             if (!$info) {
                 continue;
             }
+            // 抽象基类（如 radmin LedgerLog）：无自身路由，继承与按钮检查均由具体子类承载
+            if (!empty($info['abstract'])) {
+                continue;
+            }
             $count++;
             $rel = str_replace($root . '/', '', $file);
-            if ($info['extends'] !== 'Backend') {
+            if (!$this->extendsBackend($dir, $info['extends'])) {
                 $issues[] = "$rel: extends {$info['extends']} != Backend";
             }
             $src = file_get_contents($file);
@@ -331,13 +339,14 @@ class AuditService
         if (!is_dir($ctrlDir) || !is_dir($migDir)) {
             return null;
         }
-        // 迁移中注册的按钮名（x/y/z 三段；按钮名可含驼峰如 security/dataRecycleLog/index——统一小写比对）
+        // 迁移中注册的按钮名（x/y/z 三段；按钮名可含驼峰/连字符——webman 路由 kebab→驼峰方法等价，
+        // 如按钮 memory/snapshot/session-detail 对应方法 sessionDetail，比对统一小写+去连字符）
         $buttons = [];
         foreach ($this->phpFiles($migDir) as $mf) {
             $msrc = file_get_contents($mf);
             if (preg_match_all("~['\"]([a-zA-Z_]+/[a-zA-Z_]+/[a-zA-Z_-]+)['\"]~", $msrc, $m)) {
                 foreach ($m[1] as $name) {
-                    $buttons[strtolower($name)] = true;
+                    $buttons[str_replace('-', '', strtolower($name))] = true;
                 }
             }
         }
@@ -345,8 +354,8 @@ class AuditService
         $methodCount = 0;
         foreach ($this->phpFiles($ctrlDir) as $file) {
             $info = $this->parseClass($file);
-            if (!$info) {
-                continue;
+            if (!$info || !empty($info['abstract'])) {
+                continue; // 抽象基类无自身路由（按钮节点由具体子类的 routePath 承载）
             }
             $rel = str_replace($root . '/', '', $file);
             // routePath 前缀：完整类名去掉 controller\ 后末两段小写
@@ -364,7 +373,7 @@ class AuditService
                 }
                 $methodCount++;
                 $routePath = $prefix . '/' . strtolower($method);
-                if (!isset($buttons[$routePath])) {
+                if (!isset($buttons[str_replace('-', '', $routePath)])) {
                     $issues[] = "$rel::$method -> missing button node '$routePath'";
                 }
             }
@@ -398,11 +407,19 @@ class AuditService
         }
         $groups = [];
         foreach (['migrations', 'pg-migrations'] as $set) {
+            // 包源码（src/*/database）+ dev 宿主工程自身迁移（dev/*/database）——
+            // Phinx 装载两者，跨包撞号与「包 vs 宿主工程」撞号都要拦（knowledge 20260908010000 实案）
             foreach (glob("$root/*/database/$set/*.php") ?: [] as $file) {
                 if (!preg_match('/^(\d{14})_[a-z][a-z\d]*(?:_[a-z\d]+)*\.php$/i', basename($file), $match)) {
                     continue;
                 }
                 $groups[$match[1]][] = str_replace($root . '/', '', $file);
+            }
+            foreach (glob("$root/../dev/*/database/$set/*.php") ?: [] as $file) {
+                if (!preg_match('/^(\d{14})_[a-z][a-z\d]*(?:_[a-z\d]+)*\.php$/i', basename($file), $match)) {
+                    continue;
+                }
+                $groups[$match[1]][] = str_replace($root . '/../', '', $file);
             }
         }
         ksort($groups);
@@ -458,14 +475,9 @@ class AuditService
     protected function checkVersion(string $root, string $pkg, string $dir): ?array
     {
         $changelog = "$dir/CHANGELOG.md";
-        $devJson = '';
-        foreach (["$root/../dev/full/composer.json", "$root/dev/full/composer.json"] as $candidate) {
-            if (is_file($candidate)) {
-                $devJson = $candidate;
-                break;
-            }
-        }
-        if (!is_file($changelog) || $devJson === '') {
+        // 全部 dev 宿主（钉版散落在专属宿主：OIDC/happ/experiment/slides 等不在 dev/full）
+        $hosts = array_merge(glob("$root/../dev/*/composer.json") ?: [], glob("$root/dev/*/composer.json") ?: []);
+        if (!is_file($changelog) || !$hosts) {
             return null;
         }
         $head = file_get_contents($changelog);
@@ -485,25 +497,30 @@ class AuditService
             return null;
         }
         $compkg = strtolower($pkg);
-        $json = json_decode(file_get_contents($devJson), true);
-        $pin = '';
-        foreach (($json['repositories'] ?? []) as $repo) {
-            if (($repo['type'] ?? '') === 'path') {
-                $v = ($repo['options']['versions'] ?? [])["rocareer/$compkg"] ?? '';
-                if ($v !== '') {
-                    $pin = $v;
-                    break;
+        $pins = [];
+        foreach ($hosts as $devJson) {
+            $json = json_decode((string) file_get_contents($devJson), true);
+            foreach (($json['repositories'] ?? []) as $repo) {
+                if (($repo['type'] ?? '') === 'path') {
+                    $v = ($repo['options']['versions'] ?? [])["rocareer/$compkg"] ?? '';
+                    if ($v !== '') {
+                        $pins[basename(dirname($devJson))] = $v;
+                        break;
+                    }
                 }
             }
         }
-        if ($pin === '') {
+        if (!$pins) {
             return null;
         }
         $norm = fn($v) => strtolower(trim(str_replace(['v', 'V', '[', ']'], '', $v)));
-        if ($norm($pkgVer) !== $norm($pin)) {
-            return ['issues' => ["changelog $pkgVer != dev pin $pin"], 'note' => $pkgVer];
+        $issues = [];
+        foreach ($pins as $host => $pin) {
+            if ($norm($pkgVer) !== $norm($pin)) {
+                $issues[] = "changelog $pkgVer != dev/$host pin $pin";
+            }
         }
-        return ['issues' => [], 'note' => $pkgVer];
+        return ['issues' => $issues, 'note' => $pkgVer . '（' . count($pins) . ' 宿主钉版）'];
     }
 
     /* ---------- 7. 前端页面规范（非标手写 Vue 页面审计） ---------- */
@@ -1153,6 +1170,49 @@ class AuditService
 
     /* ---------- 解析工具（token_get_all，无正则转义） ---------- */
 
+    /**
+     * extends 链是否最终到达 Backend（中间抽象基类合法：如 radmin LedgerLog -> Backend）
+     *
+     * 包内父类按「类名 = 文件名」约定在 <pkg>/src 下定位，逐级向上解析（上限 5 层防环）；
+     * 直接 extends Backend 或链上任意一级为 Backend 均通过；父类在包外（radmin 基类）时
+     * 仅认 Backend 本身，其余（如直接 extends Api）仍按规范报出。
+     */
+    protected function extendsBackend(string $dir, string $extends): bool
+    {
+        $current = $extends;
+        for ($i = 0; $i < 5 && $current !== ''; $i++) {
+            if ($current === 'Backend') {
+                return true;
+            }
+            $parentFile = $this->classFile($dir, $current);
+            if ($parentFile === null) {
+                return false;
+            }
+            $parentInfo = $this->parseClass($parentFile);
+            $current = $parentInfo['extends'] ?? '';
+        }
+        return false;
+    }
+
+    /**
+     * 包内类文件定位（类名 = 文件名约定；索引按包目录缓存一轮）
+     */
+    protected function classFile(string $dir, string $class): ?string
+    {
+        $key = rtrim($dir, '/');
+        if (!isset($this->classFileIndex[$key])) {
+            $index = [];
+            if (is_dir("$dir/src")) {
+                foreach ($this->phpFiles("$dir/src") as $f) {
+                    $index[basename($f, '.php')][] = $f;
+                }
+            }
+            $this->classFileIndex[$key] = $index;
+        }
+        $hits = $this->classFileIndex[$key][$class] ?? [];
+        return $hits ? $hits[0] : null;
+    }
+
     protected function parseClass(string $file): ?array
     {
         $src = file_get_contents($file);
@@ -1160,6 +1220,7 @@ class AuditService
         $namespace = '';
         $class = '';
         $extends = '';
+        $abstract = false;
         $methods = [];
         $sigs = [];
         $n = count($tokens);
@@ -1181,6 +1242,18 @@ class AuditService
             }
             if ($t[0] === T_CLASS && !$class) {
                 $class = trim($tokens[$i + 2][1] ?? '');
+                // 抽象基类标记（向后扫描修饰符位置）
+                for ($k = $i - 1, $scan = 0; $k >= 0 && $scan < 4; $k--) {
+                    $pk = $tokens[$k];
+                    if (!is_array($pk) || in_array($pk[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                        continue;
+                    }
+                    $scan++;
+                    if ($pk[0] === T_ABSTRACT) {
+                        $abstract = true;
+                        break;
+                    }
+                }
                 for ($j = $i + 2; $j < $n && $j < $i + 8; $j++) {
                     if (is_array($tokens[$j]) && $tokens[$j][0] === T_EXTENDS) {
                         $extends = trim($tokens[$j + 2][1] ?? '');
@@ -1261,6 +1334,7 @@ class AuditService
             'namespace' => $namespace,
             'class' => $class,
             'extends' => $extends,
+            'abstract' => $abstract,
             'methods' => $methods,
             'sigs' => $sigs,
             'props' => static::parseProps($src),
@@ -1743,6 +1817,12 @@ class AuditService
     {
         $srcDir = "$dir/src";
         if (!is_dir($srcDir)) {
+            return null;
+        }
+        // 适用域：仅约束依赖 rocareer/radmin 的包——纯 PHP SDK（ai-client/http 等，零 radmin 依赖）
+        // 不可能调用 radmin 全局函数，机械套用即误报（global-helper-contract-versioning 模式）
+        $composer = json_decode((string) file_get_contents("$dir/composer.json"), true);
+        if (!isset($composer['require']['rocareer/radmin'])) {
             return null;
         }
         $issues = [];
