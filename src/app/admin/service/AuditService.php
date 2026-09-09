@@ -22,7 +22,7 @@ class AuditService
         'php_syntax' => ['title' => 'PHP 语法检查', 'description' => 'php -l 全量语法校验（批量子进程，单次调用）'],
         'controller' => ['title' => '控制器规范', 'description' => '继承 Backend、: Response 签名、initialize 调 parent::initialize()、public 方法返回类型'],
         'permission' => ['title' => '权限节点匹配', 'description' => '控制器方法 routePath 与迁移注册的按钮名比对：缺失/错名/孤儿按钮全部报出'],
-        'migration' => ['title' => '迁移时间戳查重', 'description' => '全工作区 migrations/pg-migrations 的 Phinx 时间戳冲突（撞号会阻断全家桶 migrate:run）'],
+        'migration' => ['title' => '迁移命名与查重（精确到秒）', 'description' => '全工作区 migrations/pg-migrations 迁移文件形态门禁（与 webman-migration v2.4.0 运行时强检同口径）：版本号撞号（撞号会阻断全家桶 migrate:run）、数字前缀非 14 位时间戳（8 位「年月日就完了」风会被 Phinx 照常加载且前缀即版本号，撞号高危）、14 位裸版本号缺名字段、不匹配 Phinx 正则的静默忽略文件（永不执行，造成已迁移假象）全部报错；「年月日+000000」存量只计数进 note 不报错（新建禁止）。新建迁移一律 php webman migrate:create 生成（真实时间戳精确到秒 + 全局查重自动顺延）'],
         'residue' => ['title' => '残留扫描', 'description' => 'CRUD 脚手架死代码（Test 控制器/模型/验证器）+ TODO/FIXME 计数'],
         'version' => ['title' => '版本同步', 'description' => 'CHANGELOG 头部版本 vs dev/full composer.json path 钉版'],
         'web_page' => ['title' => '前端页面规范', 'description' => 'Vue 页面模板一致性：禁止自创依赖注入/裸 axios//src/ 导入、baTable 体系页面必须经 baTable、弹窗提交走 onSubmit、TableHeader 顶部自定义按钮必须用标准样式类 table-header-operate（radmin 同步树跳过）'],
@@ -387,6 +387,7 @@ class AuditService
     {
         $scan = $this->workspaceMigrations($root);
         $issues = [];
+        $mine = basename($dir) . '/';
         foreach ($scan['duplicates'] as $stamp => $files) {
             if (isset($this->reportedMigrationStamps[$stamp]) || !$this->migrationBelongsToPackage($files, $dir)) {
                 continue;
@@ -394,11 +395,32 @@ class AuditService
             $this->reportedMigrationStamps[$stamp] = true;
             $issues[] = "duplicate timestamp $stamp: " . implode(', ', $files);
         }
-        return ['issues' => $issues, 'note' => $scan['count'] . ' workspace files'];
+        foreach ($scan['malformed'] as $file) {
+            if (str_starts_with($file, $mine)) {
+                $issues[] = "malformed（数字前缀非 14 位时间戳/裸版本号缺名字段，Phinx 会照常加载且前缀即版本号）: $file";
+            }
+        }
+        foreach ($scan['ignored'] as $file) {
+            if (str_starts_with($file, $mine)) {
+                $issues[] = "ignored（不匹配 Phinx 文件名正则，永远不会被执行）: $file";
+            }
+        }
+        $note = $scan['count'] . ' workspace files';
+        if ($scan['midnight'] > 0) {
+            $note .= "；{$scan['midnight']} 个「年月日+000000」存量（不报错；新建禁止——一律 migrate:create 生成精确到秒）";
+        }
+        return ['issues' => $issues, 'note' => $note];
     }
 
     /**
      * 扫描工作区全部 Phinx 迁移（业务 migrations + 向量 pg-migrations）
+     *
+     * 形态分类与 webman-migration v2.4.0 运行时强检同口径：
+     * - duplicates：14 位版本号撞号（阻断全家桶 migrate:run）；
+     * - malformed：数字前缀非 14 位（8 位纯日期风，Phinx 会照常加载且前缀即版本号）
+     *   或 14 位裸版本号缺名字段；
+     * - ignored：不匹配 Phinx 文件名正则（静默忽略，永远不会被执行）；
+     * - midnight：HHMMSS=000000 的「年月日就完了」存量（计数进 note，不报错）。
      */
     protected function workspaceMigrations(string $root): array
     {
@@ -406,20 +428,35 @@ class AuditService
             return $this->migrationScan;
         }
         $groups = [];
+        $malformed = [];
+        $ignored = [];
+        $midnight = 0;
         foreach (['migrations', 'pg-migrations'] as $set) {
             // 包源码（src/*/database）+ dev 宿主工程自身迁移（dev/*/database）——
             // Phinx 装载两者，跨包撞号与「包 vs 宿主工程」撞号都要拦（knowledge 20260908010000 实案）
+            $candidates = [];
             foreach (glob("$root/*/database/$set/*.php") ?: [] as $file) {
-                if (!preg_match('/^(\d{14})_[a-z][a-z\d]*(?:_[a-z\d]+)*\.php$/i', basename($file), $match)) {
-                    continue;
-                }
-                $groups[$match[1]][] = str_replace($root . '/', '', $file);
+                $candidates[$file] = str_replace($root . '/', '', $file);
             }
             foreach (glob("$root/../dev/*/database/$set/*.php") ?: [] as $file) {
-                if (!preg_match('/^(\d{14})_[a-z][a-z\d]*(?:_[a-z\d]+)*\.php$/i', basename($file), $match)) {
-                    continue;
+                $candidates[$file] = str_replace($root . '/../', '', $file);
+            }
+            foreach ($candidates as $file => $rel) {
+                $base = basename($file);
+                if (preg_match('/^(\d+)_/', $base, $match)) {
+                    if (strlen($match[1]) !== 14 || !preg_match('/^\d{14}_[a-z][a-z\d]*(?:_[a-z\d]+)*\.php$/i', $base)) {
+                        $malformed[] = $rel;
+                        continue;
+                    }
+                    $groups[$match[1]][] = $rel;
+                    if (substr($match[1], 8) === '000000') {
+                        $midnight++;
+                    }
+                } elseif (preg_match('/^\d{14}\.php$/', $base)) {
+                    $malformed[] = $rel;
+                } else {
+                    $ignored[] = $rel;
                 }
-                $groups[$match[1]][] = str_replace($root . '/../', '', $file);
             }
         }
         ksort($groups);
@@ -427,6 +464,9 @@ class AuditService
         return $this->migrationScan = [
             'count' => array_sum(array_map('count', $groups)),
             'duplicates' => $duplicates,
+            'malformed' => $malformed,
+            'ignored' => $ignored,
+            'midnight' => $midnight,
         ];
     }
 

@@ -1,3 +1,21 @@
+## [v3.17.0] - 2026-09-09
+
+### 增强：audit migration 规则升级「迁移命名与查重（精确到秒）」，与 webman-migration v2.4.0 运行时强检同口径
+
+背景：老板拍板迁移文件命名铁律——版本号务必精确到秒，禁止「年月日+000000」。
+webman-migration v2.4.0 运行时已扩展强检，本包 audit 门禁同步收口（原 workspaceMigrations
+对非 14 位文件直接 continue 跳过，是盲区）。
+
+- **checkMigration / workspaceMigrations 扩展**：在原有撞号查重之上新增两类报错——
+  malformed（数字前缀非 14 位时间戳含 8 位纯日期风、14 位裸版本号缺名字段：Phinx 会照常
+  加载且前缀即版本号，撞号高危）、ignored（不匹配 Phinx 文件名正则：静默忽略永不执行，
+  造成已迁移假象）；归属口径与撞号一致（只报本包目录前缀下的文件）；
+- **「年月日+000000」存量只计数进 note 不报错**（一刀切报错会让 44 个存量长期红屏失去
+  门禁信号；新建禁止，运行时已有警告，存量逐步 migrate:create 重建）；
+- **RULES['migration'] 标题/描述同步** + 种子更新迁移
+  （20260909131325_update_audit_migration_rule：按 name 定位更新 radmin_dev_audit_rule
+  规则行，缺行补插，幂等；migrate:create --pkg=webman-dev 生成，精确到秒 dogfood）。
+
 ## [v3.16.1] - 2026-09-09
 
 ### 修复：dto_contract 误报收敛到 public 方法作用域
