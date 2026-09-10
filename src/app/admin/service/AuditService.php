@@ -26,7 +26,7 @@ class AuditService
         'residue' => ['title' => '残留扫描', 'description' => 'CRUD 脚手架死代码（Test 控制器/模型/验证器）+ TODO/FIXME 计数'],
         'version' => ['title' => '版本同步', 'description' => 'CHANGELOG 头部版本 vs dev/full composer.json path 钉版'],
         'web_page' => ['title' => '前端页面规范', 'description' => 'Vue 页面模板一致性：禁止自创依赖注入/裸 axios//src/ 导入、baTable 体系页面必须经 baTable、弹窗提交走 onSubmit、TableHeader 顶部自定义按钮必须用标准样式类 table-header-operate（radmin 同步树跳过）'],
-        'happ_frontend' => ['title' => 'happ 前端接入规范', 'description' => '全域 happ 前端接入门禁（见 AGENTS.md 异步铁律 5/6 与 rocareer/happ-client README）：浏览器实时接入只认 happ-client SDK 两条路径——JS 版 /@/utils/happClient（useHapp 单例）与 Vue 版 /@/composables/useHappConnection（响应式状态 + 组件作用域订阅自动退订）；各包 web/src 内出现 new WebSocket( 或裸 ws://、wss:// 地址字面量即手写连接（绕过 HMAC 凭证认证/心跳/指数退避重连，硬编码地址与服务端下发 endpoint 冲突），全部报错；SDK 真源文件（utils/happClient.ts、composables/useHappConnection.ts）与标注 @audit-ignore happ_frontend 的文件豁免；radmin web 树为同步汇聚区跳过'],
+        'happ_frontend' => ['title' => 'happ 前端接入规范', 'description' => '全域 happ 前端接入门禁（见 AGENTS.md 异步铁律 5/6 与 rocareer/happ-client README）：浏览器实时接入只认 happ-client SDK 两条路径——JS 版 /@/utils/happClient（useHapp 单例）与 Vue 版 /@/composables/useHappConnection（响应式状态+组件作用域订阅自动退订）；各包 web/src 与全域盲区（dev 宿主工程 web 树、super/web/src、skyline 小程序——radmin 条目承载 sweepHappFrontendBlind 每轮一次）内出现 new WebSocket(、wx.connectSocket 或裸 ws://、wss:// 字面量即手写连接（绕过 HMAC 凭证认证/心跳/指数退避重连），全部报错；SDK 真源文件（utils/happClient.ts、composables/useHappConnection.ts）与标注 @audit-ignore happ_frontend 豁免'],
         'async_blocking' => ['title' => '异步阻塞扫描', 'description' => '异步铁律：常驻进程代码（src/app，排除 CLI command/）内禁止 BRPOP 长拉、同步 Guzzle HTTP、同步 SMTP、curl_exec、usleep/sleep 阻塞事件循环；文件显式声明协程回退（Coroutine::isCoroutine / inCoroutine / Fiber::getCurrent）或标注 @audit-ignore async_blocking 即视为已实现 CLI 回退，跳过'],
         'fqcn_dup' => ['title' => '同名类冲突', 'description' => '全工作区 namespace+class 对去重：同一 FQCN 被多文件定义（含 PSR-4 加载不到的死副本）即报；文件标注 @audit-ignore fqcn_dup 视为有意的真源同步副本'],
         'superglobal' => ['title' => '超全局直读', 'description' => 'webman worker 内直读 $_COOKIE/$_SERVER 不可靠（不自动填充/命名不可配），应走 support\\Context + Request；文件标注 @audit-ignore superglobal 视为已声明 CLI/回退路径人工确认'],
@@ -45,6 +45,9 @@ class AuditService
 
     /** 本轮工作区迁移扫描结果（避免每个包重复扫描） */
     protected ?array $migrationScan = null;
+
+    /** 此轮全域前端盲区扫描结果（radmin 条目承载，audit() 内重置） */
+    protected ?array $happBlindScan = null;
 
     /** 本轮已归属过迁移冲突的时间戳（避免全量审计重复报错） */
     protected array $reportedMigrationStamps = [];
@@ -133,6 +136,7 @@ class AuditService
     public function audit(string $root, array $pkgs, array $codes = []): array
     {
         $this->migrationScan = null;
+        $this->happBlindScan = null;
         $this->reportedMigrationStamps = [];
         // 常驻进程（MCP worker / 后台管理页）跨轮次复用本引擎：每轮清空静态扫描缓存，
         // 否则改码后 quality_audit 仍读上一轮文件快照 → 假 PASS/假 FAIL
@@ -677,7 +681,7 @@ class AuditService
     protected function checkHappFrontend(string $root, string $pkg, string $dir): ?array
     {
         if ($pkg === 'radmin') {
-            return null;
+            return $this->sweepHappFrontendBlind($root);
         }
         $webDir = "$dir/web/src";
         if (!is_dir($webDir)) {
@@ -721,6 +725,65 @@ class AuditService
         }
         return $out;
     }
+
+    /**
+     * 全域前端盲区扫描（radmin 条目承载）：dev 宿主工程 web 源码树、super/web/src、skyline 小程序
+     * 不属于任何 src 包，包级规则扫不到（与 migration 规则纳入 dev 各工程迁移目录同款盲区先例）。
+     * 每轮审计只扫一次（实例缓存，audit() 内重置）；口径与包级一致：
+     * new WebSocket( 与 wx.connectSocket、裸 ws:// 或 wss:// 字面量即报错；
+     * node_modules、dist、public 等产物目录与 SDK 真源文件豁免，
+     * 文件标注 @audit-ignore happ_frontend 显式豁免。
+     */
+    protected function sweepHappFrontendBlind(string $root): ?array
+    {
+        if ($this->happBlindScan !== null) {
+            return $this->happBlindScan;
+        }
+        $ws = dirname($root);
+        $trees = [];
+        foreach (array_merge(
+            glob($ws . '/dev/*/web/src') ?: [],
+            glob($ws . '/super/web/src') ?: [],
+            glob($ws . '/skyline') ?: []
+        ) as $tree) {
+            if (is_dir($tree)) {
+                $trees[] = $tree;
+            }
+        }
+        if (count($trees) === 0) {
+            return null;
+        }
+        $exempt = ['utils/happClient.ts', 'composables/useHappConnection.ts'];
+        $issues = [];
+        $checked = 0;
+        foreach ($trees as $tree) {
+            foreach ($this->webSourceFiles($tree) as $file) {
+                if (preg_match('#/(node_modules|dist|public|unpackage|miniprogram_npm|vendor)/#', $file)) {
+                    continue;
+                }
+                $relInTree = ltrim(str_replace($tree . '/', '', $file), '/');
+                if (in_array($relInTree, $exempt, true)) {
+                    continue;
+                }
+                $src = file_get_contents($file);
+                if (str_contains($src, '@audit-ignore happ_frontend')) {
+                    continue;
+                }
+                $checked++;
+                $rel = str_replace($ws . '/', '', $file);
+                if (preg_match('~new\\s+WebSocket\\s*\\(|wx\\.connectSocket~', $src)) {
+                    $issues[] = "$rel: 手写 WebSocket 连接（实时接入统一走 happ-client SDK：JS 版 useHapp / Vue 版 useHappConnection）";
+                }
+                if (preg_match("~['\"]wss?://~", $src)) {
+                    $issues[] = "$rel: 硬编码 ws:// 地址（endpoint 由服务端凭证接口下发，前端禁止自拼 WS 地址）";
+                }
+            }
+        }
+        $result = ['issues' => $issues, 'note' => $checked . ' blind-tree files (dev/super/skyline)'];
+        $this->happBlindScan = $result;
+        return $result;
+    }
+
 
     /* ---------- 8. 异步阻塞扫描（异步铁律） ---------- */
 

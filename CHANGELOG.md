@@ -1,3 +1,22 @@
+## [v3.18.1] - 2026-09-10
+
+### 增强：happ_frontend 纳入全域前端盲区扫描（dev 宿主工程 / super / skyline）
+
+背景：老板复查「检查全域 happ 应用，确保全部都是标准的，包括前端」——包级规则只扫
+src/*/web/src，dev 宿主工程（cc-knowledge 等）、super/web/src、skyline 小程序不在
+任何包内，属门禁盲区（migration 规则纳入 dev 各工程迁移目录同款先例）。
+
+- **radmin 条目承载盲区扫描**：checkHappFrontend 对 radmin 不再跳过，改执行
+  sweepHappFrontendBlind（每轮审计一次，audit() 内实例缓存重置）——glob dev/*/web/src、
+  super/web/src、skyline（排除 node_modules/dist/public/unpackage/miniprogram_npm/vendor），
+  口径与包级一致（new WebSocket(、wx.connectSocket、裸 ws://、wss:// 字面量即报错）；
+- **首轮全域盲区实扫**：59 个盲区前端文件零违例（cc gen/pointgen 的 fallbackPollTimer
+  为铁律豁免的 WS 断线兜底、exam 草稿自动保存为本地计时、experiment 全事件驱动+门控兜底）；
+- **阳性金丝雀实测**：向 dev 工程注入手写 WS 文件即 FAIL（2 issues：手写连接+硬编码地址），
+  删除即恢复 PASS——门禁真实咬人；
+- **规则种子描述同步迁移**（20260910112312）：radmin_dev_audit_rule 的 happ_frontend 行
+  description 更新为同款口径（≤500 字，幂等，新库 hasTable 守卫）。
+
 ## [v3.18.0] - 2026-09-10
 
 ### 增强：audit 新规则 happ_frontend（全域 happ 前端接入门禁）
