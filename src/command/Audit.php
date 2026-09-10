@@ -121,6 +121,7 @@ class Audit extends Command
             'event_standard' => 'event standard',
             'common_utils' => 'common utils',
             'install_standard' => 'install standard',
+            'comsearch_contract' => 'comSearch 契约（禁手写解析 search）',
             'coverage' => 'audit coverage',
         ][$code] ?? $code;
     }

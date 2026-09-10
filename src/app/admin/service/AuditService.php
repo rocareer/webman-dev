@@ -37,6 +37,7 @@ class AuditService
         'orm_migrated' => ['title' => 'think 生态残留门禁（think-orm + think-validate 等清零）', 'description' => 'think 生态残留门禁：src 内禁止任何 think 类引用（think\facade\Db / think\db\exception / think\model\relation / think\Validate / think\Facade / think\exception\ValidateException / think\Paginator / think\File / think\Exception）与 config(\'think-orm...\') 调用、composer 依赖 webman/think-orm 或 topthink/*（v5.0.0 起验证框架已切 webman/validation，think-validate/think-container 白名单随 radmin v5.0.0 移除）；文件标注 @audit-ignore orm_migrated 显式豁免'],
         'event_standard' => ['title' => '事件规范（webman/event）', 'description' => 'webman/event 使用规范门禁（见 docs/webman-event-standard.md）：事件发射一律用 Event::dispatch（不吞异常，监听器异常上抛），禁止 Event::emit（吞异常掩盖监听器故障）；事件名必须 <提供方>.<领域>.<动作> 全小写点分（禁驼峰/连字符/下划线分隔/无前缀裸名）；业务代码禁止散落 Event::on()（监听器集中 config/plugin/*/event.php 或 config/event.php 声明，唯一例外 radmin EventRegister 内置 member.*）；静态事件名应在本包/跨包/宿主有对应监听器（孤儿事件=发射即空转，纯日志应直写日志）；app/listener 监听器方法签名 (array $data): void + 自身 try/catch；文件标注 @audit-ignore event_standard 显式豁免'],
         'common_utils' => ['title' => '通用工具真源门禁（禁止重复造轮子）', 'description' => '通用工具真源门禁（见 docs/common-utils-registry.md）：已知手写重复模式必须用 radmin 全局函数——max(1, min(100 → clamp_limit、分页 max(1, (int) → clamp_page、keyword/quickSearch 兼容链 → request_keyword、where 闭包多字段 like → keyword_like、json_encode(UNICODE|SLASHES) → json_unicode、strtr(base64_encode → base64url_encode、md5(uniqid → uuid7、固定四星掩码 → mask_secret；真源定义文件（radmin functions.php）与审计引擎自身源文件豁免；文件标注 @audit-ignore common_utils 显式豁免'],
+        'comsearch_contract' => ['title' => '高级检索契约门禁（comSearch 基础能力）', 'description' => '高级检索/排序是 radmin 基础能力（Backend::applyListQueryContract 一行接入）：admin 控制器禁止手写解析 comSearch 的 search 数组（->input(\'search\')）——各处自研解析是静默腐烂高发区（print-erp 16 控制器全灭、crontab Log val/value 键错位对标准 comSearch 无效且 int/enum 列收非法串 500、slides Deck $limit 未定义变量分页大小恒默认等实证）；文件标注 @audit-ignore comsearch_contract 豁免（跨表字段别名等正当映射场景，须注释理由）'],
         'install_standard' => ['title' => 'Install.php 标准化', 'description' => 'Install.php 标准化门禁（见 docs/install-standard.md）：WEBMAN_PLUGIN 常量、install/update/uninstall 三钩子齐全、install 签名兼容官方 Install::install(true)（禁强类型参数）、禁官方骨架残留 copy_dir/remove_dir（显式 overwrite=true 的 copy_dir 除外）与 array() 语法、类前中文头注释；文件标注 @audit-ignore install_standard 显式豁免'],
     ];
 
@@ -161,6 +162,7 @@ class AuditService
             'event_standard' => 'no src/app dir',
             'common_utils' => 'no src dir / no radmin dependency (pure SDK)',
             'install_standard' => 'no src/Install.php',
+            'comsearch_contract' => 'no admin controllers',
         ];
         $packages = [];
         foreach ($pkgs as $name) {
@@ -1631,6 +1633,47 @@ class AuditService
     }
 
     /* ---------- 14. ORM 迁移门禁（think-orm 残留反向扫描） ---------- */
+
+    /* ---------- comSearch 检索契约门禁 ---------- */
+
+    /**
+     * comSearch 检索契约门禁：admin 控制器禁止手写解析 search 数组（高级检索/排序是
+     * radmin 基础能力，Backend::applyListQueryContract 一行接入）。命中定义 function index
+     * 且直接 ->input('search') 解析的控制器；已接契约（applyListQueryContract/queryBuilder）
+     * 的文件残留解析段同样报（防双轨双写）。文件标注 @audit-ignore comsearch_contract 豁免。
+     */
+    protected function checkComsearchContract(string $root, string $pkg, string $dir): ?array
+    {
+        $ctrlDir = "$dir/src/app/admin/controller";
+        if (!is_dir($ctrlDir)) {
+            return null;
+        }
+        $issues = [];
+        $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($ctrlDir, \FilesystemIterator::SKIP_DOTS));
+        foreach ($it as $file) {
+            if ($file->getExtension() !== 'php') {
+                continue;
+            }
+            $path = $file->getPathname();
+            $content = @file_get_contents($path) ?: '';
+            if (!str_contains($content, 'function index')) {
+                continue;
+            }
+            if (str_contains($content, '@audit-ignore comsearch_contract')) {
+                continue;
+            }
+            if (!preg_match('/->input\(\s*[\'"]search[\'"]/', $content, $m, PREG_OFFSET_CAPTURE)) {
+                continue;
+            }
+            $rel = str_replace(chr(92), '/', substr($path, strlen($dir) + 1));
+            $line = substr_count(substr($content, 0, $m[0][1]), "\n") + 1;
+            $usesContract = str_contains($content, 'applyListQueryContract(') || str_contains($content, 'queryBuilder()');
+            $issues[] = $usesContract
+                ? $rel . ':' . $line . ' 已接入列表契约仍手写解析 search 数组——删除手写段防双轨双写；跨表字段别名等正当场景标注 @audit-ignore comsearch_contract 并注释理由'
+                : $rel . ':' . $line . ' 手写解析 comSearch search 数组——高级检索/排序是 radmin 基础能力，改用 applyListQueryContract() 一行接入；正当场景标注 @audit-ignore comsearch_contract 并注释理由';
+        }
+        return $issues ? ['issues' => $issues] : ['issues' => [], 'note' => 'admin 控制器契约全覆盖'];
+    }
 
     protected function checkOrmMigrated(string $root, string $pkg, string $dir): ?array
     {

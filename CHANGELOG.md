@@ -1,3 +1,13 @@
+## [v3.19.0] - 2026-09-11
+
+### feat(audit): 新增 comsearch_contract 规则——admin 控制器禁手写解析 search 数组
+
+- 高级检索/排序定为 radmin 基础能力（Backend::applyListQueryContract 一行接入，
+  v5.5.0）：admin 控制器直接 ->input('search') 解析即 FAIL（已接契约仍残留解析段
+  同报，防双轨双写）；@audit-ignore comsearch_contract 豁免正当映射场景。
+- 金丝雀实测咬人（临时控制器 file:line 精确定位 + 修复指引），全域 22 包审计
+  零误伤；种子迁移幂等播种 radmin_dev_audit_rule。
+
 ## [v3.18.3] - 2026-09-11
 
 ### 审计注册表纳入 rocareer/notify
