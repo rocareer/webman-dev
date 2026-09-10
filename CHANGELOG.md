@@ -1,3 +1,11 @@
+## [v3.19.1] - 2026-09-11
+
+### feat(audit): DEFAULT_PACKAGES 注册 dataio——audit 全量门禁覆盖新导入导出包
+
+- `AuditService::DEFAULT_PACKAGES` 追加 `'dataio'`（2026-09-11 rocareer/dataio v1.0.0 首发后补登记）；
+- 此前过渡期用 `rocareer:audit --pkg=dataio` 单包校验（已全绿），本版起全量 audit 自动覆盖；
+- pending-decisions P9 随本版收口。
+
 ## [v3.19.0] - 2026-09-11
 
 ### feat(audit): 新增 comsearch_contract 规则——admin 控制器禁手写解析 search 数组
