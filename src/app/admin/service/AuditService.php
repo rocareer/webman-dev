@@ -26,6 +26,7 @@ class AuditService
         'residue' => ['title' => '残留扫描', 'description' => 'CRUD 脚手架死代码（Test 控制器/模型/验证器）+ TODO/FIXME 计数'],
         'version' => ['title' => '版本同步', 'description' => 'CHANGELOG 头部版本 vs dev/full composer.json path 钉版'],
         'web_page' => ['title' => '前端页面规范', 'description' => 'Vue 页面模板一致性：禁止自创依赖注入/裸 axios//src/ 导入、baTable 体系页面必须经 baTable、弹窗提交走 onSubmit、TableHeader 顶部自定义按钮必须用标准样式类 table-header-operate（radmin 同步树跳过）'],
+        'happ_frontend' => ['title' => 'happ 前端接入规范', 'description' => '全域 happ 前端接入门禁（见 AGENTS.md 异步铁律 5/6 与 rocareer/happ-client README）：浏览器实时接入只认 happ-client SDK 两条路径——JS 版 /@/utils/happClient（useHapp 单例）与 Vue 版 /@/composables/useHappConnection（响应式状态 + 组件作用域订阅自动退订）；各包 web/src 内出现 new WebSocket( 或裸 ws://、wss:// 地址字面量即手写连接（绕过 HMAC 凭证认证/心跳/指数退避重连，硬编码地址与服务端下发 endpoint 冲突），全部报错；SDK 真源文件（utils/happClient.ts、composables/useHappConnection.ts）与标注 @audit-ignore happ_frontend 的文件豁免；radmin web 树为同步汇聚区跳过'],
         'async_blocking' => ['title' => '异步阻塞扫描', 'description' => '异步铁律：常驻进程代码（src/app，排除 CLI command/）内禁止 BRPOP 长拉、同步 Guzzle HTTP、同步 SMTP、curl_exec、usleep/sleep 阻塞事件循环；文件显式声明协程回退（Coroutine::isCoroutine / inCoroutine / Fiber::getCurrent）或标注 @audit-ignore async_blocking 即视为已实现 CLI 回退，跳过'],
         'fqcn_dup' => ['title' => '同名类冲突', 'description' => '全工作区 namespace+class 对去重：同一 FQCN 被多文件定义（含 PSR-4 加载不到的死副本）即报；文件标注 @audit-ignore fqcn_dup 视为有意的真源同步副本'],
         'superglobal' => ['title' => '超全局直读', 'description' => 'webman worker 内直读 $_COOKIE/$_SERVER 不可靠（不自动填充/命名不可配），应走 support\\Context + Request；文件标注 @audit-ignore superglobal 视为已声明 CLI/回退路径人工确认'],
@@ -145,6 +146,7 @@ class AuditService
             'residue' => 'no src dir',
             'version' => 'version sync: changelog/dev json missing',
             'web_page' => 'web pages: none',
+            'happ_frontend' => 'frontend sources: none',
             'async_blocking' => 'no src/app dir',
             'fqcn_dup' => 'no classes',
             'superglobal' => 'no src/app dir',
@@ -652,6 +654,68 @@ class AuditService
         $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
         foreach ($it as $file) {
             if ($file->isFile() && $file->getExtension() === 'vue') {
+                $out[] = $file->getPathname();
+            }
+        }
+        return $out;
+    }
+
+    /* ---------- 7.5 happ 前端接入规范（全域统一 WS SDK） ---------- */
+
+    /**
+     * happ 前端接入规范检查（静态扫描 <pkg>/web/src 下 vue/ts/js 的手写 WebSocket）
+     *
+     * 依据「全域统一 happ 前端接入规范」（AGENTS.md 异步铁律 5/6 + happ-client README）：
+     * 浏览器实时通道只认 happ-client SDK——JS 版 useHapp / Vue 版 useHappConnection，SDK 内建
+     * HMAC 凭证认证、服务端心跳应答与指数退避重连；页面手写 new WebSocket 即绕过认证与保活，
+     * 硬编码 ws:// 地址则与服务端凭证接口下发的 endpoint 冲突，全部报错：
+     *   1. new WebSocket(（SDK 真源文件豁免）
+     *   2. 裸 ws:// / wss:// 地址字面量
+     * 说明：radmin 包 web 树是各包页面的同步汇聚区（真源在各包 web/），跳过；
+     * 文件标注 @audit-ignore happ_frontend 显式豁免。
+     */
+    protected function checkHappFrontend(string $root, string $pkg, string $dir): ?array
+    {
+        if ($pkg === 'radmin') {
+            return null;
+        }
+        $webDir = "$dir/web/src";
+        if (!is_dir($webDir)) {
+            return null;
+        }
+        $exempt = ['utils/happClient.ts', 'composables/useHappConnection.ts'];
+        $files = $this->webSourceFiles($webDir);
+        if (count($files) === 0) {
+            return null;
+        }
+        $issues = [];
+        foreach ($files as $file) {
+            $relInWeb = ltrim(str_replace($webDir . '/', '', $file), '/');
+            if (in_array($relInWeb, $exempt, true)) {
+                continue;
+            }
+            $rel = str_replace($root . '/', '', $file);
+            $src = file_get_contents($file);
+            if (str_contains($src, '@audit-ignore happ_frontend')) {
+                continue;
+            }
+            if (preg_match('~new\\s+WebSocket\\s*\\(~', $src)) {
+                $issues[] = "$rel: 手写 new WebSocket（实时接入统一走 happ-client SDK：JS 版 /@/utils/happClient 或 Vue 版 /@/composables/useHappConnection，禁自建连接/重连/心跳）";
+            }
+            if (preg_match("~['\"]wss?://~", $src)) {
+                $issues[] = "$rel: 硬编码 ws:// 地址（endpoint 由服务端凭证接口下发，前端禁止自拼 WS 地址）";
+            }
+        }
+        return ['issues' => $issues, 'note' => count($files) . ' frontend files'];
+    }
+
+    /** 全部前端源码文件（web/src 递归：vue/ts/js） */
+    protected function webSourceFiles(string $dir): array
+    {
+        $out = [];
+        $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
+        foreach ($it as $file) {
+            if ($file->isFile() && in_array($file->getExtension(), ['vue', 'ts', 'js'], true)) {
                 $out[] = $file->getPathname();
             }
         }

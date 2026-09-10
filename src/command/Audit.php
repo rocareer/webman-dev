@@ -114,6 +114,7 @@ class Audit extends Command
             'superglobal' => 'superglobals',
             'dead_code' => 'dead classes',
             'cross_copy' => 'cross-package copies',
+            'happ_frontend' => 'happ frontend sdk',
             'dto_contract' => 'DTO contract',
             'llm_gate' => 'LLM gateway gate',
             'orm_migrated' => 'ORM migrated',

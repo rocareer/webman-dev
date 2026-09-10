@@ -1,3 +1,22 @@
+## [v3.18.0] - 2026-09-10
+
+### 增强：audit 新规则 happ_frontend（全域 happ 前端接入门禁）
+
+背景：老板拍板「全域统一 happ 规范，前端不要自己乱写」——浏览器实时接入只认
+rocareer/happ-client SDK（v0.3.5 起双版本定型：JS 版 useHapp / Vue 版 useHappConnection）。
+前端手写 WebSocket 绕过 HMAC 凭证认证、服务端心跳与指数退避重连，硬编码 ws:// 地址
+与服务端凭证接口下发的 endpoint 冲突，均属规范违例。
+
+- **新增 RULES 规则 happ_frontend「happ 前端接入规范」**：静态扫描各包 web/src（vue/ts/js），
+  命中 `new WebSocket(` 或裸 ws://、wss:// 地址字面量即 FAIL（每文件一条明细防刷屏）；
+- **豁免口径**：SDK 真源文件（utils/happClient.ts、composables/useHappConnection.ts）、
+  文件标注 `@audit-ignore happ_frontend`；radmin 包 web 树为同步汇聚区（真源在各包 web/）跳过；
+- **规则种子迁移**（20260910105906，migrate:create 精确到秒）：radmin_dev_audit_rule 幂等
+  按 name 去重插入规则行（weigh 79，enabled），dev/full migrate:run 已应用、DB 行已验证；
+- **CLI ruleLabel** 同步补 happ_frontend 显示名「happ frontend sdk」；
+- 首轮全量基线绿：现有各包前端（chat/agent/ai/knowledge/memory/crontab/mcp/experiment/happ 等）
+  全部经 SDK 接入，零手写 WS，规则上线零存量违例。
+
 ## [v3.17.2] - 2026-09-10
 
 ### 修复：审计引擎静态缓存跨轮次脏读（常驻进程假 PASS/FAIL）+ CLI 展示补齐
