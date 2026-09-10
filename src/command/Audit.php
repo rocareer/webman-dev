@@ -79,7 +79,7 @@ class Audit extends Command
         ];
         $label = $this->ruleLabel($code);
         if ($skipped) {
-            $output->writeln('<comment>[SKIP]</comment> ' . $label . ($skip !== '' ? ': ' . $skip : ''));
+            $output->writeln('<comment>[NOT-APPLICABLE]</comment> ' . $label . ($skip !== '' ? ': ' . $skip : ''));
             return;
         }
         if ($pass) {
@@ -121,6 +121,7 @@ class Audit extends Command
             'event_standard' => 'event standard',
             'common_utils' => 'common utils',
             'install_standard' => 'install standard',
+            'coverage' => 'audit coverage',
         ][$code] ?? $code;
     }
 

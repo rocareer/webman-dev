@@ -88,9 +88,13 @@ class AuditCollection implements McpToolCollectionInterface
 
         $result = $service->audit($root, $pkgs, $codes);
         $issuesTotal = 0;
+        $blockedTotal = 0;
         foreach ($result['packages'] as $pkg) {
             foreach ($pkg['rules'] as $rule) {
                 $issuesTotal += (int) $rule['count'];
+                if (($rule['status'] ?? '') === 'not_applicable') {
+                    $blockedTotal++;
+                }
             }
         }
         $text = $this->render($result, $detail);
@@ -101,8 +105,9 @@ class AuditCollection implements McpToolCollectionInterface
                 'root' => $result['root'],
                 'packages' => count($result['packages']),
                 'issues_total' => $issuesTotal,
+                'not_applicable_rules' => $blockedTotal,
             ],
-            'display_message' => sprintf('工程质量审计完成：%d 个包 / %d 个问题', count($result['packages']), $issuesTotal),
+            'display_message' => sprintf('工程质量审计完成：%d 个包 / %d 个问题（未适用规则 %d）', count($result['packages']), $issuesTotal, $blockedTotal),
         ];
     }
 
@@ -121,6 +126,8 @@ class AuditCollection implements McpToolCollectionInterface
                 $total['rules']++;
                 if ($rule['skipped']) {
                     $total['skipped']++;
+                } elseif (($rule['status'] ?? '') === 'blocked') {
+                    $total['skipped']++;
                 } elseif ($rule['pass']) {
                     $total['pass']++;
                 } else {
@@ -137,7 +144,7 @@ class AuditCollection implements McpToolCollectionInterface
             $lines[] = '';
             $lines[] = '■ ' . $pkg['name'] . '  (' . $pkg['dir'] . ')';
             foreach ($pkg['rules'] as $rule) {
-                $mark = $rule['skipped'] ? '[SKIP]' : ($rule['pass'] ? '[PASS]' : '[FAIL]');
+                $mark = $rule['skipped'] ? '[NOT-APPLICABLE]' : ($rule['pass'] ? '[PASS]' : '[FAIL]');
                 $extra = $rule['skipped'] ? ($rule['skip'] !== '' ? ' ' . $rule['skip'] : '')
                     : ($rule['note'] !== '' ? ' ' . $rule['note'] : '');
                 $lines[] = "  {$mark} {$rule['title']} (#{$rule['code']})" . ($rule['count'] > 0 ? " 问题 {$rule['count']}" : '') . $extra;

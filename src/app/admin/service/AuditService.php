@@ -7,9 +7,9 @@ namespace app\admin\service;
  *
  * rocareer:audit CLI 与后台「开发运维 → 工程质量审计」管理页共用同一套规则实现。
  * 规则结果结构统一：
- *   ['code','title','pass','skipped','count','issues','note','skip']
- * skipped=true 表示规则不适用/资源缺失（CLI 打印 [SKIP]、页面显示「未执行」，skip 为原因）；
- * pass 仅对已执行（skipped=false）的规则有意义；note 为通过行的补充说明（文件数/方法数等）。
+ *   ['code','title','status','pass','skipped','count','issues','note','skip']
+ * status：pass / fail / not_applicable；skipped=true 仅表示规则不适用，不能替代覆盖失败；
+ * pass 仅对已执行规则有意义；note 为通过行的补充说明（文件数/方法数等）。
  *
  * 源码根目录约定：命令 --root 与后台 audit_root 配置都指向「包目录所在的 src 根」
  * （即同时含 radmin/、ai/ 等包目录的目录，工作区为 <Rocareer>/src）；自动探测兼容新旧布局
@@ -166,6 +166,26 @@ class AuditService
         foreach ($pkgs as $name) {
             $dir = $this->pkgDir($root, $name);
             if (!is_dir($dir)) {
+                $packages[] = [
+                    'name' => $name,
+                    'dir' => $dir,
+                    'coverage_failure' => true,
+                    'rules' => [[
+                        'code' => 'coverage',
+                        'title' => '审计覆盖范围',
+                        'status' => 'fail',
+                        'pass' => false,
+                        'skipped' => false,
+                        'count' => 1,
+                        'issues' => [[
+                            'file' => $dir,
+                            'line' => 0,
+                            'message' => '运行单元/包目录不存在，不能将未扫描视为通过',
+                        ]],
+                        'note' => '',
+                        'skip' => '',
+                    ]],
+                ];
                 continue;
             }
             $rules = [];
@@ -194,13 +214,15 @@ class AuditService
     {
         if ($result === null) {
             return [
-                'code' => $code, 'title' => $title, 'pass' => true, 'skipped' => true,
+                'code' => $code, 'title' => $title, 'status' => 'not_applicable',
+                'pass' => true, 'skipped' => true,
                 'count' => 0, 'issues' => [], 'note' => '', 'skip' => $skip,
             ];
         }
         $issues = $result['issues'] ?? [];
         return [
             'code' => $code, 'title' => $title,
+            'status' => count($issues) === 0 ? 'pass' : 'fail',
             'pass' => count($issues) === 0, 'skipped' => false,
             'count' => count($issues),
             'issues' => array_slice($issues, 0, self::MAX_ISSUES),
