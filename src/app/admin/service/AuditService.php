@@ -60,7 +60,7 @@ class AuditService
         'radmin', 'ai', 'ai-client', 'memory', 'memory-client', 'chat', 'agent', 'knowledge', 'knowledge-client',
         'asset', 'asset-client', 'OIDC', 'oidc-client', 'channel', 'channel-client', 'happ', 'happ-client',
         'http', 'infrastructure', 'webman-migration', 'crontab', 'tiktoken', 'mcp', 'webman-status-code',
-        'webman-dev', 'experiment', 'slides',
+        'webman-dev', 'experiment', 'slides', 'notify',
     ];
 
     /**
