@@ -133,6 +133,9 @@ class AuditService
     {
         $this->migrationScan = null;
         $this->reportedMigrationStamps = [];
+        // 常驻进程（MCP worker / 后台管理页）跨轮次复用本引擎：每轮清空静态扫描缓存，
+        // 否则改码后 quality_audit 仍读上一轮文件快照 → 假 PASS/假 FAIL
+        self::$rootScanCache = [];
         $codes = $codes ?: array_keys(self::RULES);
         $skipMap = [
             'php_syntax' => '',
@@ -507,7 +510,7 @@ class AuditService
         if ($todo > 0) {
             $issues[] = "$todo TODO/FIXME/HACK in src";
         }
-        return ['issues' => $issues, 'note' => 'none (TODO/FIXME count: 0)'];
+        return ['issues' => $issues, 'note' => 'clean (TODO/FIXME count: ' . $todo . ')'];
     }
 
     /* ---------- 6. 版本同步 ---------- */

@@ -1,3 +1,11 @@
+## [v3.17.2] - 2026-09-10
+
+### 修复：审计引擎静态缓存跨轮次脏读（常驻进程假 PASS/FAIL）+ CLI 展示补齐
+
+- **静态缓存脏读（主修）**：`AuditService::$rootScanCache`（rootClasses/rootClassRefs/rootFileHashes/cross_copy/事件注册表共用）跨审计轮次永不清空——CLI 一次性进程无碍，但 MCP worker / 后台「工程质量审计」管理页是常驻进程，改代码后再跑 `quality_audit` 仍读上一轮文件快照 → 假 PASS/假 FAIL。修复：每轮 `audit()` 开始清空（轮内跨规则复用缓存不受影响）。
+- CLI `ruleLabel` 补 6 条新规则展示名（dto_contract/llm_gate/orm_migrated/event_standard/common_utils/install_standard），此前回退显示原始 code。
+- `checkResidue` note 修正：原恒为 `none (TODO/FIXME count: 0)`，现输出真实计数。
+
 ## [v3.17.1] - 2026-09-09
 
 ### 修复：update_audit_migration_rule 全新库排序炸裂（阻断 fresh DB migrate:run）

@@ -114,6 +114,12 @@ class Audit extends Command
             'superglobal' => 'superglobals',
             'dead_code' => 'dead classes',
             'cross_copy' => 'cross-package copies',
+            'dto_contract' => 'DTO contract',
+            'llm_gate' => 'LLM gateway gate',
+            'orm_migrated' => 'ORM migrated',
+            'event_standard' => 'event standard',
+            'common_utils' => 'common utils',
+            'install_standard' => 'install standard',
         ][$code] ?? $code;
     }
 
