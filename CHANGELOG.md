@@ -363,7 +363,7 @@ webman-migration v2.4.0 运行时已扩展强检，本包 audit 门禁同步收�
 
 - 前端 `web/src/views/backend/audit/rules/index.vue` 移除未使用导入 ref。
 
-## [vv3.9.0] - 2026-12-06
+## [v3.9.0] - 2026-08-29
 
 ### 新增审计规则：ORM 迁移门禁（orm_migrated）
 
@@ -376,7 +376,7 @@ webman-migration v2.4.0 运行时已扩展强检，本包 audit 门禁同步收�
   `support\orm\Db` 并标注豁免；18 包全量扫描 0 问题
 - 随 radmin v4.0.0 批次发版
 
-## [v3.8.1] - 2026-12-06
+## [v3.8.1] - 2026-08-29
 
 ### 修复：审计规则种子迁移排序（全 PG 迁移通道前置）
 - `radmin_webman_dev_audit_dto_contract_rule` 文件名时间戳 20260828150000 → 20261028125000：
@@ -384,7 +384,7 @@ webman-migration v2.4.0 运行时已扩展强检，本包 audit 门禁同步收�
   （MySQL 或 PG）会因 `ra_radmin_dev_audit_rule` 不存在而失败；改名后置于建表之后、
   其余规则种子之前。老库 phinxlog 已记录旧版本号，重跑时按 name 去重幂等，无重复数据。
 
-## [v3.8.0] - 2026-12-04
+## [v3.8.0] - 2026-08-29
 
 ### 新增：全域 LLM 门禁审计规则（llm_gate，随 rocareer/agent v2.0）
 
@@ -418,7 +418,7 @@ webman-migration v2.4.0 运行时已扩展强检，本包 audit 门禁同步收�
 - 幂等迁移 `20260828150000_radmin_webman_dev_audit_dto_contract_rule` 种子规则进 `radmin_dev_audit_rule`。
 - MCP `quality_audit` 工具 `codes` 参数说明同步补齐全部规则码。
 
-## [v3.6.1] - 2026-12-03
+## [v3.6.1] - 2026-08-28
 
 ### 修复
 
@@ -427,7 +427,7 @@ webman-migration v2.4.0 运行时已扩展强检，本包 audit 门禁同步收�
   导致 `migrate:run` 报「Call to undefined method TimedOutputAdapter::quote()」；现可正常
   在 cc-knowledge 等宿主执行。幂等逻辑不变（description 一致时跳过）。
 
-## [v3.6.0] - 2026-12-03
+## [v3.6.0] - 2026-08-28
 
 ### 新增：前端按钮样式门禁（web_page 规则第 6 项）
 
@@ -438,7 +438,7 @@ webman-migration v2.4.0 运行时已扩展强检，本包 audit 门禁同步收�
 - 迁移 `20261203130000_radmin_webman_dev_audit_web_page_button_rule`（幂等）更新
   web_page 规则说明，后台「审计规则」页描述与引擎元数据同步，需 `migrate:run`。
 
-## [v3.5.1] - 2026-12-03
+## [v3.5.1] - 2026-08-28
 
 ### 修复
 
@@ -455,7 +455,7 @@ webman-migration v2.4.0 运行时已扩展强检，本包 audit 门禁同步收�
   （audit/*）不变，前端路由路径不变（目录仅分组，不进 URL）。迁移幂等，已装库
   `migrate:run` 后自动重挂，无需手工改菜单。
 
-## [v3.4.1] - 2026-10-20
+## [v3.4.1] - 2026-08-28
 
 ### 修复
 
@@ -465,7 +465,7 @@ webman-migration v2.4.0 运行时已扩展强检，本包 audit 门禁同步收�
   守卫后仅在有 mcp 的宿主注册监听（实证：dev/diancan 仅装 radmin+diancan 的宿主可正常
   migrate:run / start）。
 
-## [v3.4.0] - 2026-09-01
+## [v3.4.0] - 2026-08-27
 
 ### 规则引擎升级（rocareer:audit 精度修复，消除全量误报）
 
@@ -485,7 +485,7 @@ webman-migration v2.4.0 运行时已扩展强检，本包 audit 门禁同步收�
 - **细节修复**：usleep/sleep 探测排除 `$var()` 调用（`$sleep()` 误报）；超全局同行多次命中按行去重；
   fqcn_dup 跳过带豁免标注的副本文件后判断。
 
-## [v3.3.1] - 2026-09-01
+## [v3.3.1] - 2026-08-27
 
 ### 代码清理与修复
 
