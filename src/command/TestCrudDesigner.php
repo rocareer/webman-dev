@@ -10,13 +10,15 @@
  *   [4] CrudDesignService::validate 结构化错误（缺 comment / 非法 design_type / 重复字段名 /
  *       未声明字段引用 / 关联缺表）
  *   [5] export 反向导出 round-trip（需宿主 DB 与已生成记录；无记录时跳过不判失败）
+ *   [6] 草稿→确认→出码 链路（--pipeline，需宿主 DB；临时表用后即清）
  *
  * 用法：
  *   php webman test:crud-designer                # 全量自检（推荐）
  *   php webman test:crud-designer --export=表名  # 额外验证某表的反向导出 round-trip
+ *   php webman test:crud-designer --pipeline     # 额外验证草稿/确认/导出链路（写临时表后清理）
  *
- * 运行环境：webman 宿主 + rocareer/webman-dev（--export 需宿主 DB 可连）。
- * 注意：仅做纯内存解析/渲染断言，不写盘、不建表、不调 LLM。
+ * 运行环境：webman 宿主 + rocareer/webman-dev（--export/--pipeline 需宿主 DB 可连）。
+ * 注意：默认仅做纯内存断言，不写盘、不建表、不调 LLM；--pipeline 会生成临时模块并回收。
  */
 
 namespace Rocareer\WebmanDev\command;
@@ -57,6 +59,7 @@ class TestCrudDesigner extends Command
     protected function configure(): void
     {
         $this->addOption('export', null, InputOption::VALUE_REQUIRED, '额外验证反向导出 round-trip 的表名');
+        $this->addOption('pipeline', null, InputOption::VALUE_NONE, '额外验证草稿/确认/出码/导出链路（写临时模块后回收）');
         $this->addOption('print-hash', null, InputOption::VALUE_NONE, '打印 v1 契约黄金哈希（变更 v1 输出后显式复核用）');
     }
 
@@ -244,6 +247,15 @@ class TestCrudDesigner extends Command
             }
         }
 
+        // ---- [6] 草稿→确认→出码→导出 链路（可选；需 DB，写临时模块后回收） ----
+        if ($input->getOption('pipeline')) {
+            try {
+                $this->pipeline($svc, $io, $pass, $fail);
+            } catch (Throwable $e) {
+                $fail[] = '[6] 链路断言异常：' . $e->getMessage();
+            }
+        }
+
         // ---- 汇总 ----
         if ($fail) {
             $io->error("CRUD 设计态契约自检失败（{$pass} 通过 / " . count($fail) . ' 失败）');
@@ -252,6 +264,91 @@ class TestCrudDesigner extends Command
         }
         $io->success("CRUD 设计态契约自检通过（{$pass} 项断言）");
         return self::SUCCESS;
+    }
+
+    /**
+     * [6] 草稿 → 确认出码 → 反导出 端到端（写临时模块 p1probe_* 后回收）
+     */
+    protected function pipeline(CrudDesignService $svc, SymfonyStyle $io, int &$pass, array &$fail): void
+    {
+        if (!class_exists(\app\admin\model\CrudDesignDraft::class) || !class_exists(\app\admin\service\CrudDesignAgentService::class)) {
+            $io->note('[6] 宿主缺 CrudDesignDraft/CrudDesignAgentService（旧版 webman-dev），跳过链路自检');
+            return;
+        }
+        $table = 'zzcrudprobe_p' . substr((string) time(), -5);
+        $design = [
+            'version' => 2,
+            'table' => ['name' => $table, 'comment' => 'CRUD链路探针'],
+            'fields' => [
+                ['name' => 'title', 'comment' => '名称', 'design_type' => 'input'],
+                ['name' => 'level', 'comment' => '等级', 'design_type' => 'select',
+                    'options' => [['label' => '高', 'value' => 'H'], ['label' => '低', 'value' => 'L']]],
+            ],
+        ];
+
+        $draft = \app\admin\model\CrudDesignDraft::create([
+            'request_id' => 'probe-' . bin2hex(random_bytes(6)),
+            'table_name' => $table,
+            'prompt' => '链路自检',
+            'design' => $design,
+            'status' => \app\admin\model\CrudDesignDraft::STATUS_SUGGESTED,
+            'rounds' => 1,
+            'admin_id' => 1,
+        ]);
+        $this->assertTrue((int) $draft->id > 0, '[6a] 草稿落库', $pass, $fail);
+
+        // confirm 出码
+        $receipt = (new \app\admin\service\CrudDesignAgentService())->confirm((int) $draft->id, true);
+        $this->assertTrue(!empty($receipt['ok']), '[6b] 确认出码成功（' . ($receipt['message'] ?? ($receipt['error_code'] ?? '')) . '）', $pass, $fail);
+        $this->assertSame($table, $receipt['table'] ?? '', '[6c] 出码表名一致', $pass, $fail);
+        $draft->refresh();
+        $this->assertSame(\app\admin\model\CrudDesignDraft::STATUS_CONFIRMED, $draft->status, '[6d] 草稿状态转 confirmed', $pass, $fail);
+
+        // 反导出（该表刚有 success 记录）
+        $exp = $svc->export($table);
+        $this->assertTrue(is_array($exp), '[6e] 反导出成功', $pass, $fail);
+        if (is_array($exp)) {
+            $this->assertSame(2, count($exp['fields'] ?? []), '[6f] 反导出字段数', $pass, $fail);
+            $lv = $this->findField($exp['fields'], 'level');
+            $this->assertNotEmpty($lv['options'] ?? [], '[6g] 反导出还原 options', $pass, $fail);
+        }
+        // dump 重新解析
+        if (is_array($exp)) {
+            $re = (new CrudDesigner())->parse($exp);
+            $this->assertSame($table, $re['table_name'], '[6h] 反导出可重解析', $pass, $fail);
+        }
+
+        // 回收：删代码 + 表 + 迁移 + 菜单 + 记录
+        $base = function_exists('base_path') ? (string) base_path() : (string) getcwd();
+        foreach (CrudDesigner::targetFiles($table) as $f) {
+            $abs = $base . '/' . $f;
+            if (is_file($abs)) {
+                @unlink($abs);
+            }
+        }
+        foreach (['app/admin/controller', 'app/admin/model', 'app/admin/validate'] as $d) {
+            // 目录层级探针名无下划线，落根目录
+        }
+        foreach (glob($base . '/database/migrations/*_' . $table . '_crud.php') ?: [] as $f) {
+            @unlink($f);
+        }
+        try {
+            \support\Db::statement('DROP TABLE IF EXISTS ' . getDbPrefix() . $table . ' CASCADE');
+        } catch (Throwable $e) {
+            // 忽略
+        }
+        try {
+            \app\admin\model\CrudLog::where('table_name', $table)->update(['status' => 'delete']);
+            $draft->delete();
+            // 菜单（name=zzcrudprobe_xxx -> zzcrudprobe/xxx）
+            $menuName = str_replace('_', '/', $table);
+            if (class_exists(\app\admin\library\Menu::class)) {
+                \app\admin\library\Menu::delete($menuName, true);
+            }
+        } catch (Throwable $e) {
+            // 忽略
+        }
+        $io->note("[6] 链路自检完成，临时模块 {$table} 已回收");
     }
 
     /**

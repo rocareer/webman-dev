@@ -12,11 +12,14 @@
  *   --force           目标文件已存在时仍覆盖（默认冲突即中止）
  *   --json            以结构化 JSON 回执输出（供 AI/脚本消费；成功=设计+文件+迁移，失败=错误码）
  *   --dry-run         只做净化+校验+预览，不写盘不生成（配合 --json 供 AI 自校验）
+ *   --migrate         生成后自动执行 php webman migrate:run 建表（闭环编排）
+ *   --audit           生成后自动跑工程质量审计（rocareer:audit；缺省全工作区门禁）
+ *   --audit-pkg=包名  配合 --audit：只审计指定包（如 webman-dev），不传则全工作区
  *
  * 流程：设计 JSON -> 净化(sanitize)/校验(validate) -> 渲染 database/migrations/<ts>_<table>_crud.php（PG 幂等建表）
  *       -> 调 radmin app\admin\service\CrudService（v5.1.0+，后台 /admin/crud 同一引擎）
  *       生成 控制器/模型/验证器 + 前端 index.vue/popupForm.vue + 语言包 + 菜单（幂等）
- *       -> 提示执行 php webman migrate:run 建表（表结构真源=迁移，可追溯）。
+ *       -> [--migrate] 建表 -> [--audit] 审计。
  * 注意：生成目标是「运行本命令的宿主工程」（app/ 与 web/src/ 相对宿主根）；
  *       需宿主安装 rocareer/radmin v5.1.0+（缺 class 时给出升级提示）。
  */
@@ -24,13 +27,12 @@
 namespace Rocareer\WebmanDev\command;
 
 use Rocareer\WebmanDev\support\CrudDesigner;
-use Rocareer\WebmanDev\support\CrudDesignService;
+use Rocareer\WebmanDev\support\CrudDesignGenerator;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
-use Throwable;
 
 class MakeCrud extends Command
 {
@@ -64,6 +66,9 @@ JSON;
         $this->addOption('force', null, InputOption::VALUE_NONE, 'Overwrite existing target files');
         $this->addOption('json', null, InputOption::VALUE_NONE, 'Output a structured JSON receipt (for AI/scripts)');
         $this->addOption('dry-run', null, InputOption::VALUE_NONE, 'Sanitize+validate only, no files written');
+        $this->addOption('migrate', null, InputOption::VALUE_NONE, 'Run migrate:run after generation (close the loop)');
+        $this->addOption('audit', null, InputOption::VALUE_NONE, 'Run rocareer:audit after generation');
+        $this->addOption('audit-pkg', null, InputOption::VALUE_REQUIRED, 'Limit --audit to one package (default: whole workspace)');
         $this->addOption('demo', null, InputOption::VALUE_NONE, 'Print example design JSON');
     }
 
@@ -86,128 +91,100 @@ JSON;
             return $this->fail($io, $asJson, 'bad_json', '设计 JSON 解析失败：' . json_last_error_msg());
         }
 
-        // 引擎可用性（radmin v5.1.0+ 才有 CrudService）
-        if (!class_exists(\app\admin\service\CrudService::class)) {
-            return $this->fail($io, $asJson, 'radmin_too_old', '宿主 rocareer/radmin 版本过低：CRUD 引擎 CrudService 不存在（需 v5.1.0+，请先 composer update rocareer/radmin）');
+        $generator = new CrudDesignGenerator();
+        $receipt = $generator->generate(
+            $design,
+            (bool) $input->getOption('no-migration'),
+            (bool) $input->getOption('force'),
+            (bool) $input->getOption('dry-run')
+        );
+
+        if (empty($receipt['ok'])) {
+            return $this->fail($io, $asJson, (string) ($receipt['error_code'] ?? 'failed'),
+                (string) ($receipt['message'] ?? '生成失败'), $receipt);
         }
 
-        // 1) 净化 + 结构化校验（不抛异常，返回全部问题，供 AI 自修复）
-        $designSvc = new CrudDesignService();
-        $sanitized = $designSvc->sanitize($design);
-        $errors = $designSvc->validate($sanitized['design']);
-        if ($errors) {
-            return $this->fail($io, $asJson, 'validation_failed', '设计校验未通过（' . count($errors) . ' 项）', [
-                'errors' => $errors,
-                'warnings' => $sanitized['warnings'],
-            ]);
-        }
+        $isDryRun = (bool) ($receipt['dry_run'] ?? false);
+        // 进度行在 --json 模式写 stderr，避免污染 stdout 的 JSON 回执
+        $progress = function (string $msg) use ($io, $asJson, $output): void {
+            $asJson ? $output->getErrorOutput()->writeln($msg) : $io->text($msg);
+        };
 
-        // 2) 严格解析（净化后设计喂引擎）
-        try {
-            $parsed = (new CrudDesigner())->parse($sanitized['design']);
-        } catch (Throwable $e) {
-            return $this->fail($io, $asJson, 'parse_failed', $e->getMessage(), [
-                'warnings' => $sanitized['warnings'],
-            ]);
-        }
-        $warnings = array_merge($sanitized['warnings'], $parsed['warnings'] ?? []);
-
-        $base = $this->basePath();
-        $noMigration = (bool) $input->getOption('no-migration');
-        $targetFiles = CrudDesigner::targetFiles($parsed['table_name']);
-
-        // 3) dry-run：只回执不写盘
-        if ($input->getOption('dry-run')) {
-            $receipt = [
-                'ok' => true,
-                'dry_run' => true,
-                'design_version' => (int) ($sanitized['design']['version'] ?? 1),
-                'table' => $parsed['table_name'],
-                'comment' => $parsed['table']['comment'],
-                'menu' => '/admin/' . $parsed['menu_name'] . '/index',
-                'form_fields' => $parsed['table']['formFields'],
-                'column_fields' => $parsed['table']['columnFields'],
-                'target_files' => $targetFiles,
-                'warnings' => $warnings,
-            ];
-            return $this->ok($io, $asJson, $receipt);
-        }
-
-        // 4) 目标文件冲突预检（防覆盖已改代码；--force 跳过）——先于写迁移，失败零落盘
-        if (!$input->getOption('force')) {
-            $conflicts = $this->detectConflicts($base, $parsed);
-            if ($conflicts) {
-                return $this->fail($io, $asJson, 'file_conflict',
-                    '以下文件已存在（已生成过？用 --force 覆盖，或换表名/删旧 CRUD 记录）：' . implode(', ', $conflicts),
-                    ['conflicts' => $conflicts]);
+        // 闭环编排：建表 → 审计（仅真正生成时执行）
+        if (!$isDryRun && $input->getOption('migrate') && ($receipt['migration'] ?? '') !== '') {
+            $progress('执行 migrate:run 建表……');
+            $migrate = $generator->migrate();
+            $receipt['migrate'] = $migrate;
+            if ($migrate['ok']) {
+                $receipt['next_step'] = '';
             }
         }
-
-        // 5) 幂等迁移文件落盘（默认；同名表迁移已存在则复用提示，不重复写）
-        $migrationFile = '';
-        $migrationReused = false;
-        if (!$noMigration) {
-            $migrationDir = $base . '/database/migrations';
-            $existing = glob($migrationDir . '/*_' . $parsed['table_name'] . '_crud.php');
-            if ($existing) {
-                $migrationReused = true;
-                $migrationFile = str_replace($base . '/', '', $existing[0]);
-            } else {
-                $full = $migrationDir . '/' . $parsed['ts'] . '_' . $parsed['table_name'] . '_crud.php';
-                $this->writeFile($full, $parsed['migration']);
-                $migrationFile = str_replace($base . '/', '', $full);
-            }
+        if (!$isDryRun && $input->getOption('audit')) {
+            $progress('执行工程质量审计（rocareer:audit）……');
+            $receipt['audit'] = $this->runAudit((string) $input->getOption('audit-pkg'));
         }
 
-        // 6) 引擎生成（type=update：表已存在（迁移建）则不动表只出代码；表不存在则由引擎按设计建表兜底）
-        $io->text('调用 CRUD 引擎生成（radmin CrudService）……');
-        $result = (new \app\admin\service\CrudService())->generate('update', $parsed['table'], $parsed['fields']);
-
-        // 7) 结构化回执
-        $logId = ($result['crud_log'] ?? null) ? (int) $result['crud_log']->id : 0;
-        $receipt = [
-            'ok' => true,
-            'dry_run' => false,
-            'design_version' => (int) ($sanitized['design']['version'] ?? 1),
-            'table' => $parsed['table_name'],
-            'comment' => $parsed['table']['comment'],
-            'menu' => '/admin/' . $parsed['menu_name'] . '/index',
-            'form_fields' => $parsed['table']['formFields'],
-            'column_fields' => $parsed['table']['columnFields'],
-            'target_files' => $targetFiles,
-            'migration' => $migrationFile,
-            'migration_reused' => $migrationReused,
-            'crud_log_id' => $logId,
-            'next_step' => $migrationFile !== '' && !$migrationReused
-                ? 'php webman migrate:run 建表（幂等），随后重跑本命令补出代码'
-                : '',
-            'warnings' => $warnings,
-        ];
-
+        // 输出
         if ($asJson) {
             return $this->ok($io, true, $receipt);
         }
 
-        // 人类可读摘要
-        foreach ($warnings as $warn) {
+        foreach (($receipt['warnings'] ?? []) as $warn) {
             $io->warning($warn);
         }
+        if ($isDryRun) {
+            $io->success('设计校验通过（dry-run，未写盘）');
+            $io->writeln('  表：' . $receipt['table'] . '，表单字段 ' . count($receipt['form_fields'] ?? []) . ' 项');
+            return self::SUCCESS;
+        }
         $io->success('标准模块生成完成');
-        $io->writeln('  表：' . $parsed['table_name'] . '（comment=' . $parsed['table']['comment'] . '）');
-        if ($migrationFile !== '') {
-            $io->writeln('  迁移：' . $migrationFile);
-            if ($migrationReused) {
-                $io->writeln('  （同名迁移已存在，跳过写迁移）');
-            } else {
-                $io->writeln('  > 请执行 php webman migrate:run 建表（幂等可重复）；表就绪后重跑本命令即可补出代码（覆盖需 --force）');
+        $io->writeln('  表：' . $receipt['table'] . '（comment=' . $receipt['comment'] . '）');
+        if (($receipt['migration'] ?? '') !== '') {
+            $io->writeln('  迁移：' . $receipt['migration'] . ($receipt['migration_reused'] ?? false ? '（同名迁移已存在，跳过写）' : ''));
+        }
+        $io->writeln('  菜单：' . ($receipt['menu'] ?? '') . '（含 index/add/edit/del/sortable 权限，幂等种入）');
+        if (!empty($receipt['crud_log_id'])) {
+            $io->writeln('  生成记录：#' . $receipt['crud_log_id'] . '（后台 CRUD 代码生成页可回溯/删除）');
+        }
+        if (isset($receipt['migrate'])) {
+            $io->writeln('  migrate:run：' . ($receipt['migrate']['ok'] ? '已建表' : '失败'));
+            if (!$receipt['migrate']['ok']) {
+                $io->writeln('    ' . mb_substr($receipt['migrate']['output'], 0, 500));
             }
         }
-        $io->writeln('  菜单：/admin/' . $parsed['menu_name'] . '/index（含 index/add/edit/del/sortable 权限，幂等种入）');
-        if ($logId) {
-            $io->writeln('  生成记录：#' . $logId . '（后台 CRUD 代码生成页可回溯/删除）');
+        if (isset($receipt['audit'])) {
+            $io->writeln('  审计：' . ($receipt['audit']['pass'] ? '全部通过' : '存在问题（见上）'));
         }
-        $io->writeln('  建议：编辑 index.vue/popupForm.vue 按需调列渲染（如 status 列 render=\'switch\'）后提交');
+        if (!empty($receipt['next_step'])) {
+            $io->writeln('  > ' . $receipt['next_step']);
+        }
         return self::SUCCESS;
+    }
+
+    /**
+     * 运行工程质量审计（子进程 rocareer:audit），返回结构化结果
+     *
+     * @param string $pkg 限定的包名（空 = 全工作区默认包集）
+     */
+    protected function runAudit(string $pkg = ''): array
+    {
+        $base = $this->basePath();
+        $php = defined('PHP_BINARY') ? PHP_BINARY : 'php';
+        $cmd = escapeshellarg($php) . ' webman rocareer:audit';
+        if ($pkg !== '') {
+            $cmd .= ' --pkg=' . escapeshellarg($pkg);
+        }
+        $proc = @proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $base);
+        if (!is_resource($proc)) {
+            return ['pass' => false, 'output' => '无法启动 rocareer:audit 子进程'];
+        }
+        $out = (string) stream_get_contents($pipes[1]);
+        $err = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $code = proc_close($proc);
+        $output = trim($out . ($err !== '' ? "\n" . $err : ''));
+        return ['pass' => $code === 0, 'output' => mb_substr($output, -4000)];
     }
 
     /**
@@ -246,35 +223,10 @@ JSON;
     }
 
     /**
-     * 探测目标文件冲突（复用 CrudDesigner::targetFiles 同源推导）
-     */
-    protected function detectConflicts(string $base, array $parsed): array
-    {
-        $conflicts = [];
-        foreach (CrudDesigner::targetFiles($parsed['table_name']) as $file) {
-            if (is_file($base . '/' . $file)) {
-                $conflicts[] = $file;
-            }
-        }
-        return $conflicts;
-    }
-
-    /**
      * 宿主根目录
      */
     protected function basePath(): string
     {
         return function_exists('base_path') ? (string) base_path() : (defined('BASE_PATH') ? BASE_PATH : (string) getcwd());
-    }
-
-    /**
-     * 写文件（目录自动创建）
-     */
-    protected function writeFile(string $path, string $content): void
-    {
-        if (!is_dir(dirname($path))) {
-            mkdir(dirname($path), 0755, true);
-        }
-        file_put_contents($path, $content);
     }
 }

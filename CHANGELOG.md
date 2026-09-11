@@ -1,3 +1,29 @@
+## [v3.21.0] - 2026-09-12
+
+### feat(design): AI 模块设计生成管线 + 生成后闭环编排 + MCP 开发工具链（FACTORY P1）
+
+- **AI 设计生成**（`app\admin\service\CrudDesignAgentService` + 草稿表 `radmin_crud_design_draft`）：
+  `suggest()` 落 pending 草稿 + 投递队列 `crud-design`（消费者模板 `CrudDesignConsumer` 由 Install 落盘
+  宿主 `app/queue/redis/`）→ `execute()` 调 `AgentGateway::chat` 产设计 JSON → `stripJsonFence` →
+  `CrudDesignService::sanitize`（反幻觉白名单）→ `::validate`（结构化错误）→ 不通过**回灌错误自修复一轮**
+  → 落草稿 `status=suggested` + happ 推送（`crud.design.suggested`）。
+- **红线（同 dataio）**：`suggest()` 只落草稿，代码无任何直达 generate 的路径；出码仅在 `confirm()` 内；
+  **MCP 不提供确认工具**（防 AI 绕过人工）；人工入口 = CLI `rocareer:crud-design confirm <id>`
+  （新增命令，含 `list/show/confirm/reject`，P2 将补后台可视化设计台）。
+- **共享出码执行器** `CrudDesignGenerator`：把「净化→校验→写迁移→冲突预检→调 CrudService」收敛为单点，
+  CLI 与 `confirm()` 共用，两条路径产物一致。
+- **生成后闭环**：`rocareer:make-crud` 新增 `--migrate`（生成后自动 `migrate:run` 建表）、
+  `--audit [--audit-pkg=包名]`（生成后自动审计）；`--json` 模式进度行改走 stderr，stdout 只出 JSON 回执。
+- **MCP 工具链**（`/mcp/crud`，集合 key=`crud`）：`crud_generate` 升级结构化回执（设计版本/字段名单/
+  目标文件/迁移/crud_log_id）并支持 v2 设计对象与 `run_migrate`；新增 `crud_design_suggest`（AI 草稿，
+  异步；risk=write）、`crud_design_export`（反导出设计 JSON v2；safe）、`module_rollback`（回收模块：
+  删代码+菜单+空目录，可选删迁移/drop 表；drop_table 需 `confirm=true`；write）、`migrate_status`（safe）。
+- **修复**：`rocareer:audit` 遇到包目录不存在的 coverage 失败时，把合成 issue 数组当字符串拼接 →
+  `Array to string conversion` 崩溃；CLI（`Audit.php`）与 MCP（`AuditCollection`）双路径归一化渲染，
+  现在输出可读的「包目录不存在」提示而非崩溃。
+- 自检：`test:crud-designer` 新增 `--pipeline`（草稿→确认→出码→导出 链路，写临时模块后回收），
+  全量 51 项断言。
+
 ## [v3.20.2] - 2026-09-12
 
 ### fix: 死类检测提前终止扫描修复（use 导入分支 break 2 → break）

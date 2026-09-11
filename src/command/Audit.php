@@ -88,6 +88,13 @@ class Audit extends Command
         }
         $output->writeln('<fg=red>[FAIL]</fg=red> ' . $label . ' (' . $count . ' issue(s)):');
         foreach (array_slice($issues, 0, 15) as $line) {
+            // 常规规则 issue 为字符串；coverage 等合成的 issue 为 ['file','line','message'] 数组
+            if (is_array($line)) {
+                $file = (string) ($line['file'] ?? '');
+                $ln = (int) ($line['line'] ?? 0);
+                $msg = (string) ($line['message'] ?? '');
+                $line = $file . ($ln > 0 ? ':' . $ln : '') . ($msg !== '' ? ' ' . $msg : '');
+            }
             $output->writeln('       ' . $line);
         }
         if ($count > count($issues)) {

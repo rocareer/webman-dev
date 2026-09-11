@@ -15,4 +15,5 @@ return [
     \Rocareer\WebmanDev\command\MakePlugin::class,
     \Rocareer\WebmanDev\command\MakeCrud::class,
     \Rocareer\WebmanDev\command\TestCrudDesigner::class,
+    \Rocareer\WebmanDev\command\CrudDesign::class,
 ];

@@ -150,12 +150,26 @@ class AuditCollection implements McpToolCollectionInterface
                 $lines[] = "  {$mark} {$rule['title']} (#{$rule['code']})" . ($rule['count'] > 0 ? " 问题 {$rule['count']}" : '') . $extra;
                 if ($detail && !$rule['pass'] && !$rule['skipped']) {
                     foreach (array_slice($rule['issues'], 0, 20) as $issue) {
-                        $lines[] = '      - ' . mb_substr((string) $issue, 0, 200);
+                        $lines[] = '      - ' . mb_substr($this->formatIssue($issue), 0, 200);
                     }
                 }
             }
         }
         return implode("\n", $lines);
+    }
+
+    /**
+     * 规则 issue 归一为可读字符串（常规为字符串；coverage 等合成为 ['file','line','message'] 数组）
+     */
+    protected function formatIssue($issue): string
+    {
+        if (is_array($issue)) {
+            $file = (string) ($issue['file'] ?? '');
+            $line = (int) ($issue['line'] ?? 0);
+            $msg = (string) ($issue['message'] ?? '');
+            return $file . ($line > 0 ? ':' . $line : '') . ($msg !== '' ? ' ' . $msg : '');
+        }
+        return (string) $issue;
     }
 
     /**

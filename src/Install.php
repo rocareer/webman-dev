@@ -8,6 +8,10 @@ namespace Rocareer\WebmanDev;
  * 安装（composer require / update）：把插件接线配置
  *   config/plugin/rocareer/webman-dev/ 复制到宿主工程对应目录（pathRelation），
  *   使插件配置与命令在宿主侧生效；卸载（composer remove）时移除上述接线配置。
+ *
+ * 另：AI 模块设计生成（FACTORY P1）的队列消费者模板
+ *   src/command/templates/consumer/CrudDesignConsumer.php → 宿主 app/queue/redis/，
+ *   由 webman/redis-queue 消费进程自动加载（consumer_dir = app/queue/redis）。
  */
 class Install
 {
@@ -21,6 +25,13 @@ class Install
     ];
 
     /**
+     * 落盘到宿主的队列消费者模板（源相对包根 => 宿主目标相对项目根）
+     */
+    protected static $consumerFiles = [
+        'src/command/templates/consumer/CrudDesignConsumer.php' => 'app/queue/redis/CrudDesignConsumer.php',
+    ];
+
+    /**
      * 安装钩子：复制接线配置到宿主项目
      *
      * @param bool $isFirst 是否首次安装（composer require 时为 true，update 回退时为 false）
@@ -28,6 +39,7 @@ class Install
     public static function install($isFirst = true): void
     {
         static::installByRelation($isFirst);
+        static::installConsumers($isFirst);
     }
 
     /**
@@ -36,6 +48,7 @@ class Install
     public static function update(): void
     {
         static::installByRelation(false);
+        static::installConsumers(false);
     }
 
     /**
@@ -44,6 +57,43 @@ class Install
     public static function uninstall(): void
     {
         static::uninstallByRelation();
+        static::uninstallConsumers();
+    }
+
+    /**
+     * 复制队列消费者模板到宿主（不覆盖宿主已改文件；缺文件时补齐）
+     */
+    protected static function installConsumers(bool $isFirst): void
+    {
+        foreach (static::$consumerFiles as $source => $dest) {
+            $destPath = base_path() . '/' . $dest;
+            if (!$isFirst && is_file($destPath)) {
+                continue;
+            }
+            $sourcePath = dirname(__DIR__) . '/' . $source;
+            if (!is_file($sourcePath)) {
+                continue;
+            }
+            if (!is_dir(dirname($destPath))) {
+                mkdir(dirname($destPath), 0777, true);
+            }
+            copy($sourcePath, $destPath);
+            echo "Copy $dest\n";
+        }
+    }
+
+    /**
+     * 移除宿主侧的队列消费者模板
+     */
+    protected static function uninstallConsumers(): void
+    {
+        foreach (static::$consumerFiles as $source => $dest) {
+            $path = base_path() . '/' . $dest;
+            if (is_file($path) && !is_link($path)) {
+                unlink($path);
+                echo "Remove $dest\n";
+            }
+        }
     }
 
     /**
