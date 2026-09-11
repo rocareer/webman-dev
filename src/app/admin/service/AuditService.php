@@ -1311,11 +1311,13 @@ class AuditService
                     continue;
                 }
                 // use 导入的短名/别名引用（:: / ::class / new 构造）
+                // 注意只能 break 本层导入循环：break 2 会连带终止外层文件扫描，
+                // 其他类先命中即让后续文件的引用永远扫不到 → 死类误报（v3.20.2 实证）
                 if ($imports) {
                     foreach ($imports as $name => $importFqcn) {
                         if ($importFqcn === $fqcn && preg_match('~\b' . preg_quote($name, '~') . '(?=\s*::|\s*\()~', $src)) {
                             $used = true;
-                            break 2;
+                            break;
                         }
                     }
                 }
