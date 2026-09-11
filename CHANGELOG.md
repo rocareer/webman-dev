@@ -1,3 +1,12 @@
+## [v3.21.1] - 2026-09-12
+
+### fix(test): test:crud-designer --pipeline 自清理收口（真实零残留）
+
+浏览器验收 P2 时发现该自检会残留：菜单节点未删（Menu 类命名空间写成 `app\admin\library\Menu`，
+真源是 `app\common\library\Menu`——写错静默 no-op）、前端 views/lang 空目录未清理、crud_log 行只标
+`status=delete` 反复跑会累积。现改为：真源目录删菜单（含子孙）、递归清理代码/页面/语言各层空目录、
+物理删除 crud_log 行。跑完 `test:crud-designer --pipeline` 后菜单/表/文件/crud_log 全部归零。
+
 ## [v3.21.0] - 2026-09-12
 
 ### feat(design): AI 模块设计生成管线 + 生成后闭环编排 + MCP 开发工具链（FACTORY P1）

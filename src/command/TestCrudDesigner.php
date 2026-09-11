@@ -326,8 +326,9 @@ class TestCrudDesigner extends Command
                 @unlink($abs);
             }
         }
-        foreach (['app/admin/controller', 'app/admin/model', 'app/admin/validate'] as $d) {
-            // 目录层级探针名无下划线，落根目录
+        // 清理生成留下的空目录（代码/页面/语言各层级）
+        foreach (['app/admin/controller', 'app/admin/model', 'app/admin/validate', 'web/src/views/backend', 'web/src/lang/backend/zh-cn', 'web/src/lang/backend/en'] as $d) {
+            $this->pruneEmptyDirs($base . '/' . $d);
         }
         foreach (glob($base . '/database/migrations/*_' . $table . '_crud.php') ?: [] as $f) {
             @unlink($f);
@@ -338,17 +339,48 @@ class TestCrudDesigner extends Command
             // 忽略
         }
         try {
-            \app\admin\model\CrudLog::where('table_name', $table)->update(['status' => 'delete']);
+            // 探针须零残留：直接删 crud_log 行（radmin 常规删除流只标 status=delete，
+            // 但自检反复跑会累积，故此处物理删除）
+            \app\admin\model\CrudLog::where('table_name', $table)->delete();
             $draft->delete();
             // 菜单（name=zzcrudprobe_xxx -> zzcrudprobe/xxx）
+            // 真源是 app\common\library\Menu（非 app\admin\library\Menu——写错会静默 no-op 残留菜单）
             $menuName = str_replace('_', '/', $table);
-            if (class_exists(\app\admin\library\Menu::class)) {
-                \app\admin\library\Menu::delete($menuName, true);
+            if (class_exists(\app\common\library\Menu::class)) {
+                \app\common\library\Menu::delete($menuName, true);
             }
         } catch (Throwable $e) {
             // 忽略
         }
         $io->note("[6] 链路自检完成，临时模块 {$table} 已回收");
+    }
+
+    /**
+     * 递归清理空目录（生成器留下的 module 目录层级）
+     */
+    protected function pruneEmptyDirs(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+        foreach (scandir($dir) ?: [] as $item) {
+            if ($item === '.' || $item === '..') {
+                continue;
+            }
+            $path = $dir . '/' . $item;
+            if (is_dir($path)) {
+                $this->pruneEmptyDirs($path);
+                $n = 0;
+                foreach (scandir($path) ?: [] as $x) {
+                    if ($x !== '.' && $x !== '..') {
+                        $n++;
+                    }
+                }
+                if ($n === 0) {
+                    @rmdir($path);
+                }
+            }
+        }
     }
 
     /**
