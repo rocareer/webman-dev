@@ -15,6 +15,10 @@ class RadminWebmanDevAuditDtoContractRule extends AbstractMigration
 {
     public function up()
     {
+        // 全新库全量重放守卫：本迁移版本号早于建表迁移（20261028120000，未来时间戳风格），全新库按版本号排序会先跑本条而表尚未建——直接跳过（规则行由建表迁移种子收口）；存量库 phinx 已记录不重跑。
+        if (!$this->hasTable(getDbPrefix() . 'radmin_dev_audit_rule')) {
+            return;
+        }
         $prefix = getDbPrefix();
         $table = $prefix . 'radmin_dev_audit_rule';
         $now = time();

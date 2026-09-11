@@ -1,3 +1,9 @@
+## [v3.20.1] - 2026-09-12
+
+### fix: audit 规则种子迁移补「全新库全量重放」守卫（colleague 新库首跑发现）
+
+audit 规则种子迁移（20260909~20261231 十条）版本号早于建表迁移 `20261028120000_radmin_webman_dev_audit_page`（历史未来时间戳风格），全新库按版本号排序先跑种子而 `ra_radmin_dev_audit_rule` 表尚未建 → 直接炸。本次给全部无守卫的种子迁移统一补 `hasTable` 守卫（表未建跳过，规则行由建表迁移种子收口；存量库 phinx 已记录不重跑，零影响）。
+
 ## [v3.20.0] - 2026-09-12
 
 ### feat(design): 设计态契约 v2 + CrudDesignService 净化/校验/反导出（FACTORY P0）
