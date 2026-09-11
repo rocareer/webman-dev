@@ -13,4 +13,6 @@ return [
     \Rocareer\WebmanDev\command\RocareerPlugin::class,
     \Rocareer\WebmanDev\command\Audit::class,
     \Rocareer\WebmanDev\command\MakePlugin::class,
+    \Rocareer\WebmanDev\command\MakeCrud::class,
+    \Rocareer\WebmanDev\command\TestCrudDesigner::class,
 ];

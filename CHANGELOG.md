@@ -1,3 +1,28 @@
+## [v3.20.0] - 2026-09-12
+
+### feat(design): 设计态契约 v2 + CrudDesignService 净化/校验/反导出（FACTORY P0）
+
+- **设计态契约 v2**（`CrudDesigner`，新增键全部可选，**v1 输入输出逐字节不变**）：
+  字段级 `options`（结构化选项，自动转 comment 字典）/ `remote`（关联表字段，向引擎
+  下发 remoteSelect 契约并自动推导 controller）/ `form`、`table`（字段级属性，引擎
+  getFormField/getTableColumn 消费）/ `group`；表级 `default_sort` / `is_common_model` /
+  `form_layout`（表单分组布局，决定表单项顺序）。`design_type` 白名单新增
+  `remote_select`（bigint）/ `remote_selects`（varchar 1500）。
+- **新增 `CrudDesignService`**（`src/support/CrudDesignService.php`）：
+  `sanitize()` 反幻觉白名单净化（未知键丢弃、非法属性剔除、remote 缺 table 降级，绝不放行）；
+  `validate()` 返回**结构化错误数组**（field/code/message，规则与 parse 同一套但收集全部错误，
+  供 AI 一轮自修复）；`export()` 从 `ra_admin_crud_log` 反向导出设计 JSON v2（含 options/remote 还原），
+  供 AI 参考同包先例与可视化再编辑。
+- **CLI `rocareer:make-crud`**：新增 `--json`（结构化回执：设计版本/字段名单/目标文件/迁移/日志 id）、
+  `--dry-run`（只净化校验预览不写盘）、校验失败回执带结构化 error_code + errors（不再只吐单条文案）。
+- **新增 `test:crud-designer` 自检命令**：v1 契约黄金哈希回归（[1k] 冻结基线，v2 改动不得移动 v1 输出）
+  + v2 增强（options/remote/layout/form/table）+ sanitize 净化 + validate 结构化错误 + export
+  round-trip，共 43–45 项断言。
+- **修复**：`config/plugin/rocareer/webman-dev/command.php` 补齐 `MakeCrud` 注册（历史遗漏，
+  新装宿主缺 make-crud 命令）；`src/config/plugin/...` 遗留副本同步补齐。
+- 方案：`docs/radmin-dev-factory-plan.md`（FACTORY P0；P1 AI 生成管线 + 闭环编排、
+  P2 可视化设计台、P3 协作深化另行建卡）。
+
 ## [v3.19.1] - 2026-09-11
 
 ### feat(audit): DEFAULT_PACKAGES 注册 dataio——audit 全量门禁覆盖新导入导出包

@@ -33,6 +33,22 @@ use InvalidArgumentException;
  * 字典/选项编码在 comment（radmin CRUD 惯例）：「标题: 键=值,键=值」——
  * select/radio/checkbox/selects 自动从 comment 提取枚举值并生成语言包，如
  * "状态: 0=禁用,1=启用"、"难度: easy=简单,hard=困难"。
+ *
+ * ---- 设计态契约 v2（version=2；新增键全部可选，v1 输入行为逐字节不变） ----
+ * 字段级增强：
+ *   options  [{label,value}] 结构化选项（自动转 comment 字典，engine 无需改动）
+ *   remote   {table,pk,field,controller,model,relation_fields,alias} 关联表字段
+ *            （design_type 用 remote_select/remote_selects；DB 列 remote_select=bigint、
+ *             remote_selects=varchar(1500)；引擎自动生成 belongsTo/remoteSelectLabels）
+ *   form     {rows,step,placeholder,...} 字段级表单属性（引擎 getFormField 消费）
+ *   table    {render,operator,width,sortable,...} 字段级列表属性（引擎 getTableColumn 消费）
+ *   group    "分组名"（配合 table.form_layout 表达表单分组）
+ * 表级增强：
+ *   default_sort   {field,type} 默认排序（缺省 id desc）
+ *   is_common_model bool 通用模型
+ *   form_layout    [{group,fields[],span}] 表单分组布局（决定表单项顺序；引擎不消费，元数据）
+ *
+ * 净化/校验/反导出见 CrudDesignService（sanitize/validate/export）；CLI/MCP 可直接吃 AI 产出。
  */
 class CrudDesigner
 {
@@ -57,12 +73,15 @@ class CrudDesigner
         'file'      => 'file',
         'files'     => 'files',
         'weigh'     => 'weigh',
+        // v2 关联字段（需同时声明 remote 配置；引擎 designType 为驼峰 remoteSelect）
+        'remote_select'  => 'remoteSelect',
+        'remote_selects' => 'remoteSelects',
     ];
 
     /**
      * 表/模块目录名合法性（防路径穿越/注入）
      */
-    protected const NAME_RULE = '/^[a-z][a-z0-9_]*$/';
+    public const NAME_RULE = '/^[a-z][a-z0-9_]*$/';
 
     /**
      * 解析简化设计
@@ -156,12 +175,25 @@ class CrudDesigner
         // 空数组会由引擎自动补主键，业务表无搜索字段可接受
         $hasForm = array_key_exists('form_fields', $t);
         $hasColumn = array_key_exists('column_fields', $t);
-        $formFields = $hasForm ? $this->pickList($t['form_fields'] ?? [], 'form_fields', $allowedNames) : $businessNames;
+        // v2：未显式给定 form_fields 时，表单分组布局（form_layout）决定表单项顺序
+        $layoutOrder = $this->layoutFieldOrder($t['form_layout'] ?? [], $businessNames);
+        $formFields = $hasForm
+            ? $this->pickList($t['form_fields'] ?? [], 'form_fields', $allowedNames)
+            : ($layoutOrder ?: $businessNames);
         $columnFields = $hasColumn ? $this->pickList($t['column_fields'] ?? [], 'column_fields', $allowedNames) : $businessNames;
         // 列表补 id 列（后台惯例首列 ID）
         if (!in_array('id', $columnFields, true)) {
             array_unshift($columnFields, 'id');
         }
+
+        // ---- v2 表级增强（缺省 = v1 行为：id desc / 非通用模型） ----
+        $defaultSortField = 'id';
+        $defaultSortType = 'desc';
+        if (!empty($t['default_sort']['field'])) {
+            $defaultSortField = strtolower(trim((string) $t['default_sort']['field']));
+            $defaultSortType = strtolower((string) ($t['default_sort']['type'] ?? 'desc')) === 'asc' ? 'asc' : 'desc';
+        }
+        $isCommonModel = !empty($t['is_common_model']);
 
         // ---- 3. 代码落盘位置（file 键留空 = 引擎按表名自动推导到 app/admin/controller 等） ----
         $tablePayload = [
@@ -172,9 +204,9 @@ class CrudDesigner
             'quickSearchField' => $quickSearch,
             'formFields' => $formFields,
             'columnFields' => $columnFields,
-            'defaultSortField' => 'id',
-            'defaultSortType' => 'desc',
-            'isCommonModel' => false,
+            'defaultSortField' => $defaultSortField,
+            'defaultSortType' => $defaultSortType,
+            'isCommonModel' => $isCommonModel,
         ];
         // 菜单名 = 引擎 getMenuName：表名下划线即页面/菜单目录层级（cc_student -> cc/student，
         // 代码落 app/admin/controller/cc/Student.php + web/src/views/backend/cc/student/）
@@ -220,6 +252,33 @@ class CrudDesigner
         $designType = self::DESIGN_TYPES[$dt];
         $required = !empty($f['required']);
         $default = isset($f['default']) && $f['default'] !== '' ? (string) $f['default'] : null;
+
+        // ---- v2：结构化 options 优先于 comment 字典（统一转 comment 字典，引擎无需改动） ----
+        if (!empty($f['options']) && in_array($dt, ['select', 'radio', 'checkbox', 'selects'], true)) {
+            $normalized = str_replace(['：'], [':'], $comment);
+            $title = str_contains($normalized, ':') ? trim(explode(':', $normalized)[0]) : $comment;
+            $pairs = [];
+            foreach ((array) $f['options'] as $o) {
+                $val = is_array($o) ? (string) ($o['value'] ?? '') : (string) $o;
+                if ($val === '') {
+                    continue;
+                }
+                $label = is_array($o) ? (string) ($o['label'] ?? $val) : (string) $o;
+                $pairs[] = $val . '=' . $label;
+            }
+            if ($pairs) {
+                $comment = $title . ': ' . implode(',', $pairs);
+            }
+        }
+        // ---- v2：remote 关联字段（design_type=remote_select/remote_selects 或显式 remote 块） ----
+        $remote = is_array($f['remote'] ?? null) ? $f['remote'] : [];
+        if (in_array($dt, ['remote_select', 'remote_selects'], true) && empty($remote['table'])) {
+            throw new InvalidArgumentException("字段 {$name}（{$dt}）必须声明 remote.table 关联表");
+        }
+        if ($remote && empty($remote['table'])) {
+            // 显式 remote 块但缺 table：降级为普通字段（反幻觉，不放过来源不明的关联表）
+            $remote = [];
+        }
 
         // 字典枚举值（select/radio/checkbox/selects 从 comment 提取）
         $dictValues = [];
@@ -320,6 +379,19 @@ class CrudDesigner
                 $field['defaultType'] = 'INPUT';
                 $field['default'] = $default ?? '0';
                 break;
+            case 'remote_select':
+                // 关联 ID 列（bigint；与引擎 remoteSelect 搭配生成 belongsTo 关联）
+                $field['type'] = 'bigint';
+                $field['unsigned'] = true;
+                $field['length'] = $length ?: 20;
+                break;
+            case 'remote_selects':
+                // 多选关联：逗号串存 varchar(1500)（引擎 dtStringToArray 存取器）
+                $field['type'] = 'varchar';
+                $field['defaultType'] = 'EMPTY STRING';
+                $field['null'] = false;
+                $field['length'] = $length ?: 1500;
+                break;
         }
         // 默认值（用户显式 default 非空：除主键（NONE）外一律 INPUT 落地）
         if ($default !== null && $default !== '' && $field['defaultType'] !== 'NONE') {
@@ -334,6 +406,30 @@ class CrudDesigner
             if ($field['defaultType'] === 'NULL') {
                 $field['defaultType'] = 'NONE';
             }
+        }
+        // ---- v2：字段级 form/table 属性（引擎 getFormField / getTableColumn 消费） ----
+        if (!empty($f['form']) && is_array($f['form'])) {
+            $field['form'] = $this->normalizeAttrs($f['form'], 'form');
+        }
+        if (!empty($f['table']) && is_array($f['table'])) {
+            $field['table'] = $this->normalizeAttrs($f['table'], 'table');
+        }
+        // ---- v2：remote 关联配置（键名与引擎 remoteSelect 契约对齐：下划线 -> camel 键） ----
+        if ($remote) {
+            $remoteForm = [
+                'remote-table' => (string) $remote['table'],
+                'remote-pk' => strtolower(trim((string) ($remote['pk'] ?? 'id'))),
+                'remote-field' => strtolower(trim((string) ($remote['field'] ?? 'name'))),
+                // 引擎 getRemoteSelectUrl 仅识别 remote-source-config-type=crud + remote-controller
+                'remote-source-config-type' => 'crud',
+                'remote-controller' => trim((string) ($remote['controller'] ?? '')) ?: $this->deriveRemoteController((string) $remote['table']),
+                'remote-model' => trim((string) ($remote['model'] ?? '')),
+                'relation-fields' => trim((string) ($remote['relation_fields'] ?? '')),
+                'remote-primary-table-alias' => trim((string) ($remote['alias'] ?? '')),
+                'select-multi' => $dt === 'remote_selects',
+            ];
+            // 字段级 form 属性并入（用户显式声明优先）
+            $field['form'] = array_merge($remoteForm, $field['form']);
         }
         // 主键：仅支持 id（见方法头注释）——id 自动主键；显式 primary_key 非 id 报错
         $primaryKey = $name === 'id' ? true : (!empty($f['primary_key']) ? throw new InvalidArgumentException(
@@ -418,6 +514,71 @@ class CrudDesigner
             $out[] = $item;
         }
         return $out;
+    }
+
+    /**
+     * 表单分组布局（v2 form_layout）-> 表单项顺序
+     *
+     * 布局只决定顺序与分组元数据，不增减字段：未在布局中出现的业务字段按原顺序追加在末尾。
+     */
+    protected function layoutFieldOrder($layout, array $businessNames): array
+    {
+        if (!is_array($layout) || !$layout) {
+            return [];
+        }
+        $seen = [];
+        $order = [];
+        foreach ($layout as $g) {
+            foreach ((array) ($g['fields'] ?? []) as $fname) {
+                $fname = strtolower(trim((string) $fname));
+                if ($fname === '' || isset($seen[$fname]) || !in_array($fname, $businessNames, true)) {
+                    continue;
+                }
+                $seen[$fname] = true;
+                $order[] = $fname;
+            }
+        }
+        foreach ($businessNames as $fname) {
+            if (!isset($seen[$fname])) {
+                $order[] = $fname;
+            }
+        }
+        return $order;
+    }
+
+    /**
+     * 字段级 form/table 属性归一（布尔/整型强转；空值剔除）
+     */
+    protected function normalizeAttrs(array $attrs, string $scope): array
+    {
+        $intKeys = $scope === 'form' ? ['rows', 'step'] : ['width'];
+        $boolKeys = $scope === 'form' ? ['select-multi'] : ['sortable', 'comSearch'];
+        $out = [];
+        foreach ($attrs as $k => $v) {
+            if ($v === '' || $v === null || (is_array($v) && !$v)) {
+                continue;
+            }
+            if (in_array($k, $intKeys, true)) {
+                $out[$k] = (int) $v;
+            } elseif (in_array($k, $boolKeys, true)) {
+                $out[$k] = (bool) $v;
+            } else {
+                $out[$k] = (string) $v;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * 由关联表名推导控制器路径（remote 下拉数据源；与引擎目录惯例同源）
+     * cc_student -> cc/Student（引擎 getRemoteSelectUrl 会拼成 /admin/cc/Student/index）
+     */
+    protected function deriveRemoteController(string $remoteTable): string
+    {
+        $path = str_replace('_', '/', $remoteTable);
+        $parts = explode('/', $path);
+        $last = self::camel((string) array_pop($parts));
+        return ($parts ? implode('/', $parts) . '/' : '') . $last;
     }
 
     /**

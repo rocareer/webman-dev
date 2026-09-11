@@ -7,11 +7,13 @@
  *   php webman rocareer:make-crud --demo                         # 打印示例设计 JSON
  *
  * 选项：
- *   --design=路径     简化设计 JSON（格式见 --demo；AI 可直接产出）
+ *   --design=路径     简化设计 JSON（格式见 --demo；AI 可直接产出；支持 version=2 增强契约）
  *   --no-migration    不写幂等迁移文件（表已自行准备好时用）
  *   --force           目标文件已存在时仍覆盖（默认冲突即中止）
+ *   --json            以结构化 JSON 回执输出（供 AI/脚本消费；成功=设计+文件+迁移，失败=错误码）
+ *   --dry-run         只做净化+校验+预览，不写盘不生成（配合 --json 供 AI 自校验）
  *
- * 流程：设计 JSON -> 渲染 database/migrations/<ts>_<table>_crud.php（PG 幂等建表）
+ * 流程：设计 JSON -> 净化(sanitize)/校验(validate) -> 渲染 database/migrations/<ts>_<table>_crud.php（PG 幂等建表）
  *       -> 调 radmin app\admin\service\CrudService（v5.1.0+，后台 /admin/crud 同一引擎）
  *       生成 控制器/模型/验证器 + 前端 index.vue/popupForm.vue + 语言包 + 菜单（幂等）
  *       -> 提示执行 php webman migrate:run 建表（表结构真源=迁移，可追溯）。
@@ -22,6 +24,7 @@
 namespace Rocareer\WebmanDev\command;
 
 use Rocareer\WebmanDev\support\CrudDesigner;
+use Rocareer\WebmanDev\support\CrudDesignService;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -59,12 +62,15 @@ JSON;
         $this->addOption('design', null, InputOption::VALUE_REQUIRED, 'Path to design JSON file');
         $this->addOption('no-migration', null, InputOption::VALUE_NONE, 'Skip writing migration file (table already prepared)');
         $this->addOption('force', null, InputOption::VALUE_NONE, 'Overwrite existing target files');
+        $this->addOption('json', null, InputOption::VALUE_NONE, 'Output a structured JSON receipt (for AI/scripts)');
+        $this->addOption('dry-run', null, InputOption::VALUE_NONE, 'Sanitize+validate only, no files written');
         $this->addOption('demo', null, InputOption::VALUE_NONE, 'Print example design JSON');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
+        $asJson = (bool) $input->getOption('json');
 
         if ($input->getOption('demo')) {
             $io->writeln(self::DEMO_JSON);
@@ -73,78 +79,170 @@ JSON;
 
         $designPath = (string) $input->getOption('design');
         if ($designPath === '' || !is_file($designPath)) {
-            $io->error('缺少设计文件：--design=/path/design.json（先跑 --demo 看示例格式）');
-            return self::FAILURE;
+            return $this->fail($io, $asJson, 'no_design', '缺少设计文件：--design=/path/design.json（先跑 --demo 看示例格式）');
         }
         $design = json_decode((string) file_get_contents($designPath), true);
         if (!is_array($design)) {
-            $io->error('设计 JSON 解析失败：' . json_last_error_msg());
-            return self::FAILURE;
+            return $this->fail($io, $asJson, 'bad_json', '设计 JSON 解析失败：' . json_last_error_msg());
         }
 
         // 引擎可用性（radmin v5.1.0+ 才有 CrudService）
         if (!class_exists(\app\admin\service\CrudService::class)) {
-            $io->error('宿主 rocareer/radmin 版本过低：CRUD 引擎 CrudService 不存在（需 v5.1.0+，请先 composer update rocareer/radmin）');
-            return self::FAILURE;
+            return $this->fail($io, $asJson, 'radmin_too_old', '宿主 rocareer/radmin 版本过低：CRUD 引擎 CrudService 不存在（需 v5.1.0+，请先 composer update rocareer/radmin）');
         }
 
-        try {
-            $parsed = (new CrudDesigner())->parse($design);
-        } catch (Throwable $e) {
-            $io->error($e->getMessage());
-            return self::FAILURE;
+        // 1) 净化 + 结构化校验（不抛异常，返回全部问题，供 AI 自修复）
+        $designSvc = new CrudDesignService();
+        $sanitized = $designSvc->sanitize($design);
+        $errors = $designSvc->validate($sanitized['design']);
+        if ($errors) {
+            return $this->fail($io, $asJson, 'validation_failed', '设计校验未通过（' . count($errors) . ' 项）', [
+                'errors' => $errors,
+                'warnings' => $sanitized['warnings'],
+            ]);
         }
+
+        // 2) 严格解析（净化后设计喂引擎）
+        try {
+            $parsed = (new CrudDesigner())->parse($sanitized['design']);
+        } catch (Throwable $e) {
+            return $this->fail($io, $asJson, 'parse_failed', $e->getMessage(), [
+                'warnings' => $sanitized['warnings'],
+            ]);
+        }
+        $warnings = array_merge($sanitized['warnings'], $parsed['warnings'] ?? []);
 
         $base = $this->basePath();
         $noMigration = (bool) $input->getOption('no-migration');
+        $targetFiles = CrudDesigner::targetFiles($parsed['table_name']);
 
-        // 1) 目标文件冲突预检（防覆盖已改代码；--force 跳过）——先于写迁移，失败零落盘
+        // 3) dry-run：只回执不写盘
+        if ($input->getOption('dry-run')) {
+            $receipt = [
+                'ok' => true,
+                'dry_run' => true,
+                'design_version' => (int) ($sanitized['design']['version'] ?? 1),
+                'table' => $parsed['table_name'],
+                'comment' => $parsed['table']['comment'],
+                'menu' => '/admin/' . $parsed['menu_name'] . '/index',
+                'form_fields' => $parsed['table']['formFields'],
+                'column_fields' => $parsed['table']['columnFields'],
+                'target_files' => $targetFiles,
+                'warnings' => $warnings,
+            ];
+            return $this->ok($io, $asJson, $receipt);
+        }
+
+        // 4) 目标文件冲突预检（防覆盖已改代码；--force 跳过）——先于写迁移，失败零落盘
         if (!$input->getOption('force')) {
             $conflicts = $this->detectConflicts($base, $parsed);
             if ($conflicts) {
-                $io->error('以下文件已存在（已生成过？用 --force 覆盖，或换表名/删旧 CRUD 记录）：');
-                $io->listing($conflicts);
-                return self::FAILURE;
+                return $this->fail($io, $asJson, 'file_conflict',
+                    '以下文件已存在（已生成过？用 --force 覆盖，或换表名/删旧 CRUD 记录）：' . implode(', ', $conflicts),
+                    ['conflicts' => $conflicts]);
             }
         }
 
-        // 2) 幂等迁移文件落盘（默认；同名表迁移已存在则复用提示，不重复写）
+        // 5) 幂等迁移文件落盘（默认；同名表迁移已存在则复用提示，不重复写）
         $migrationFile = '';
+        $migrationReused = false;
         if (!$noMigration) {
             $migrationDir = $base . '/database/migrations';
             $existing = glob($migrationDir . '/*_' . $parsed['table_name'] . '_crud.php');
             if ($existing) {
-                $io->note('同名表迁移已存在：' . str_replace($base . '/', '', $existing[0]) . '（跳过写迁移；表已 migrate:run 则直接出代码）');
-                $migrationFile = '';
+                $migrationReused = true;
+                $migrationFile = str_replace($base . '/', '', $existing[0]);
             } else {
-                $migrationFile = $migrationDir . '/' . $parsed['ts'] . '_' . $parsed['table_name'] . '_crud.php';
-                $this->writeFile($migrationFile, $parsed['migration']);
+                $full = $migrationDir . '/' . $parsed['ts'] . '_' . $parsed['table_name'] . '_crud.php';
+                $this->writeFile($full, $parsed['migration']);
+                $migrationFile = str_replace($base . '/', '', $full);
             }
         }
 
-        // 3) 引擎生成（type=update：表已存在（迁移建）则不动表只出代码；表不存在则由引擎按设计建表兜底）
+        // 6) 引擎生成（type=update：表已存在（迁移建）则不动表只出代码；表不存在则由引擎按设计建表兜底）
         $io->text('调用 CRUD 引擎生成（radmin CrudService）……');
         $result = (new \app\admin\service\CrudService())->generate('update', $parsed['table'], $parsed['fields']);
 
-        // 设计提示（字典缺失等，非阻断）
-        foreach ($parsed['warnings'] ?? [] as $warn) {
-            $io->warning($warn);
+        // 7) 结构化回执
+        $logId = ($result['crud_log'] ?? null) ? (int) $result['crud_log']->id : 0;
+        $receipt = [
+            'ok' => true,
+            'dry_run' => false,
+            'design_version' => (int) ($sanitized['design']['version'] ?? 1),
+            'table' => $parsed['table_name'],
+            'comment' => $parsed['table']['comment'],
+            'menu' => '/admin/' . $parsed['menu_name'] . '/index',
+            'form_fields' => $parsed['table']['formFields'],
+            'column_fields' => $parsed['table']['columnFields'],
+            'target_files' => $targetFiles,
+            'migration' => $migrationFile,
+            'migration_reused' => $migrationReused,
+            'crud_log_id' => $logId,
+            'next_step' => $migrationFile !== '' && !$migrationReused
+                ? 'php webman migrate:run 建表（幂等），随后重跑本命令补出代码'
+                : '',
+            'warnings' => $warnings,
+        ];
+
+        if ($asJson) {
+            return $this->ok($io, true, $receipt);
         }
 
-        // 4) 摘要
+        // 人类可读摘要
+        foreach ($warnings as $warn) {
+            $io->warning($warn);
+        }
         $io->success('标准模块生成完成');
         $io->writeln('  表：' . $parsed['table_name'] . '（comment=' . $parsed['table']['comment'] . '）');
         if ($migrationFile !== '') {
-            $io->writeln('  迁移：' . str_replace($base . '/', '', $migrationFile));
-            $io->writeln('  > 请执行 php webman migrate:run 建表（幂等可重复）；表就绪后重跑本命令即可补出代码（覆盖需 --force）');
+            $io->writeln('  迁移：' . $migrationFile);
+            if ($migrationReused) {
+                $io->writeln('  （同名迁移已存在，跳过写迁移）');
+            } else {
+                $io->writeln('  > 请执行 php webman migrate:run 建表（幂等可重复）；表就绪后重跑本命令即可补出代码（覆盖需 --force）');
+            }
         }
         $io->writeln('  菜单：/admin/' . $parsed['menu_name'] . '/index（含 index/add/edit/del/sortable 权限，幂等种入）');
-        if (($result['crud_log'] ?? null)) {
-            $log = $result['crud_log'];
-            $io->writeln('  生成记录：#' . $log->id . '（后台 CRUD 代码生成页可回溯/删除）');
+        if ($logId) {
+            $io->writeln('  生成记录：#' . $logId . '（后台 CRUD 代码生成页可回溯/删除）');
         }
         $io->writeln('  建议：编辑 index.vue/popupForm.vue 按需调列渲染（如 status 列 render=\'switch\'）后提交');
         return self::SUCCESS;
+    }
+
+    /**
+     * 成功回执（--json 输出结构化 JSON，否则静默——人类摘要由调用方已打印）
+     */
+    protected function ok(SymfonyStyle $io, bool $asJson, array $receipt): int
+    {
+        if ($asJson) {
+            $io->writeln(json_unicode($receipt, JSON_PRETTY_PRINT));
+        } elseif (!empty($receipt['dry_run'])) {
+            $io->success('设计校验通过（dry-run，未写盘）');
+            $io->writeln('  表：' . $receipt['table'] . '，表单字段 ' . count($receipt['form_fields']) . ' 项');
+        }
+        return self::SUCCESS;
+    }
+
+    /**
+     * 失败回执（--json 输出结构化 JSON 错误，否则人类可读错误）
+     */
+    protected function fail(SymfonyStyle $io, bool $asJson, string $code, string $message, array $extra = []): int
+    {
+        if ($asJson) {
+            $io->writeln(json_unicode(
+                array_merge(['ok' => false, 'error_code' => $code, 'message' => $message], $extra),
+                JSON_PRETTY_PRINT
+            ));
+        } else {
+            $io->error($message);
+            if (!empty($extra['errors'])) {
+                foreach ($extra['errors'] as $e) {
+                    $io->writeln('  - [' . ($e['code'] ?? '') . '] ' . ($e['field'] ?? '') . '：' . ($e['message'] ?? ''));
+                }
+            }
+        }
+        return self::FAILURE;
     }
 
     /**
