@@ -8,6 +8,13 @@
  * 用法：php webman rocareer:audit [--root=包目录根] [--pkg=ai]
  *   --root：含 radmin/ 等包目录的 src 根（工作区为 <Rocareer>/src）；不传则自动向上探测，
  *          兼容传工作区根（内部落到 <workspace>/src）。
+ *
+ *   --list-rules                     只打印规则目录（code/名称/判定标准与修复指引），不执行审计
+ *   --list-rules --json              规则目录以 JSON 输出（供脚本/AI 消费）
+ *   --list-rules --write-doc=路径    把规则目录写成自动生成的 Markdown 自检清单（如 docs/audit-rules.md）
+ *
+ * 规则目录单一真源 = AuditService::RULES（本命令只渲染，不维护副本），
+ * 故文档不会与引擎漂移：改规则后重跑 --write-doc 即同步。
  */
 
 namespace Rocareer\WebmanDev\command;
@@ -33,10 +40,17 @@ class Audit extends Command
     {
         $this->addOption('root', null, InputOption::VALUE_REQUIRED, '包目录根（含 radmin 等包目录）');
         $this->addOption('pkg', null, InputOption::VALUE_REQUIRED, '仅审计单个包');
+        $this->addOption('list-rules', null, InputOption::VALUE_NONE, '打印规则目录（不执行审计）');
+        $this->addOption('json', null, InputOption::VALUE_NONE, '配合 --list-rules：JSON 输出');
+        $this->addOption('write-doc', null, InputOption::VALUE_REQUIRED, '配合 --list-rules：写出自动生成的 Markdown 自检清单');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        if ($input->getOption('list-rules')) {
+            return $this->listRules($input, $output);
+        }
+
         $service = new AuditService();
         $root = $this->detectRoot($input->getOption('root'));
         if ($root === '') {
@@ -101,6 +115,107 @@ class Audit extends Command
             $output->writeln('       … 还有 ' . ($count - count($issues)) . ' 条');
         }
         $this->failCount += $count;
+    }
+
+    /**
+     * 打印/写出规则目录（单一真源 AuditService::RULES）
+     *
+     * 用途：给 AI/人一份「写码自检清单」，免去逐份翻 AGENTS.md 与各 SKILL.md；
+     * 因直接从引擎常量渲染，规则演进后重跑即同步，不存在文档漂移。
+     */
+    protected function listRules(InputInterface $input, OutputInterface $output): int
+    {
+        $rules = AuditService::RULES;
+        $asJson = (bool) $input->getOption('json');
+        $docPath = (string) ($input->getOption('write-doc') ?? '');
+
+        // --write-doc：落盘自动生成文档（不打印，避免与审计输出混淆）
+        if ($docPath !== '') {
+            $dir = dirname($docPath);
+            if (!is_dir($dir)) {
+                mkdir($dir, 0755, true);
+            }
+            file_put_contents($docPath, $this->renderRulesDoc($rules));
+            $output->writeln('<info>规则清单已写出：' . $docPath . '（' . count($rules) . ' 条规则，由引擎常量自动生成，勿手工编辑）</info>');
+            return self::SUCCESS;
+        }
+
+        if ($asJson) {
+            $out = [];
+            foreach ($rules as $code => $meta) {
+                $out[] = ['code' => $code, 'title' => $meta['title'], 'description' => $meta['description']];
+            }
+            $output->writeln(json_unicode(['count' => count($rules), 'rules' => $out], JSON_PRETTY_PRINT));
+            return self::SUCCESS;
+        }
+
+        $output->writeln('<info>rocareer:audit 规则目录（' . count($rules) . ' 条，真源 AuditService::RULES）</info>');
+        $output->writeln('');
+        $i = 0;
+        foreach ($rules as $code => $meta) {
+            $i++;
+            $output->writeln('<options=bold>' . $i . '. ' . $meta['title'] . ' (#' . $code . ')</>');
+            $output->writeln('   ' . $meta['description']);
+            $output->writeln('');
+        }
+        $output->writeln('<comment>豁免：文件内标注 @audit-ignore &lt;code&gt; 可跳过该规则（须注明理由）。</comment>');
+        $output->writeln('<comment>运行：php webman rocareer:audit [--pkg=包名]；导出文档：--list-rules --write-doc=docs/audit-rules.md</comment>');
+        return self::SUCCESS;
+    }
+
+    /**
+     * 渲染规则清单 Markdown（自动生成物，顶部标注勿手工编辑）
+     */
+    protected function renderRulesDoc(array $rules): string
+    {
+        $lines = [];
+        $lines[] = '# rocareer 工程质量审计规则清单';
+        $lines[] = '';
+        $lines[] = '> **本文件由 `php webman rocareer:audit --list-rules --write-doc=docs/audit-rules.md` 自动生成，请勿手工编辑。**';
+        $lines[] = '> 单一真源 = `webman-dev/src/app/admin/service/AuditService.php` 的 `RULES` 常量；';
+        $lines[] = '> 规则有任何增改，重跑上述命令即可同步，故本清单不会与引擎漂移。';
+        $lines[] = '';
+        $lines[] = '审计引擎在**代码生成/提交/发版**前提供统一门禁（`rocareer:audit` CLI、MCP `quality_audit`、';
+        $lines[] = '后台「开发和调试 → 工程质量审计」三入口共用同一引擎）。写码时按下表自查，可避免绝大多数返工。';
+        $lines[] = '';
+        $lines[] = '## 规则索引';
+        $lines[] = '';
+        $lines[] = '| # | 规则 | code | 一句话 |';
+        $lines[] = '|---|---|---|---|';
+        $i = 0;
+        foreach ($rules as $code => $meta) {
+            $i++;
+            $brief = mb_substr(explode('：', $meta['description'])[0], 0, 60);
+            $lines[] = "| {$i} | {$meta['title']} | `{$code}` | " . str_replace('|', '\\|', $brief) . ' |';
+        }
+        $lines[] = '';
+        $lines[] = '## 规则详述';
+        $lines[] = '';
+        $i = 0;
+        foreach ($rules as $code => $meta) {
+            $i++;
+            $lines[] = "### {$i}. {$meta['title']}";
+            $lines[] = '';
+            $lines[] = '- **code**：`' . $code . '`';
+            $lines[] = '- **判定与修复**：' . $meta['description'];
+            $lines[] = '';
+        }
+        $lines[] = '## 豁免机制';
+        $lines[] = '';
+        $lines[] = '文件内标注 `@audit-ignore <code>` 可跳过对应规则；用于有意的例外（如跨表字段别名映射、';
+        $lines[] = '真源同步副本、CLI 回退路径），须同时写明理由，便于后人复核。';
+        $lines[] = '';
+        $lines[] = '## 使用方式';
+        $lines[] = '';
+        $lines[] = '```bash';
+        $lines[] = 'php webman rocareer:audit                  # 全量审计（默认包集）';
+        $lines[] = 'php webman rocareer:audit --pkg=radmin     # 单包审计（改动后自查）';
+        $lines[] = 'php webman rocareer:audit --list-rules     # 打印本清单';
+        $lines[] = '```';
+        $lines[] = '';
+        $lines[] = 'MCP 侧等价工具：`quality_audit`（集合 `dev`，子端点 `/mcp/dev`）。';
+        $lines[] = '';
+        return implode("\n", $lines);
     }
 
     /**

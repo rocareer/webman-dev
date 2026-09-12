@@ -1,3 +1,18 @@
+## [v3.22.0] - 2026-09-12
+
+### feat(audit): 规则自检清单自动生成 + MCP list_rules（FACTORY P3）
+
+- `rocareer:audit` 新增三形态：`--list-rules`（打印规则目录）、`--list-rules --json`
+  （结构化输出供脚本/AI 消费）、`--list-rules --write-doc=路径`（自动生成 Markdown 自检清单）。
+- **单一真源 = `AuditService::RULES`**：清单由引擎常量直接渲染，规则增改后重跑命令即同步，
+  不存在「文档写了、引擎没做」或反过来的漂移（实证：临时改规则标题后重生成，文档同步命中）。
+- 落地 `docs/audit-rules.md`（工作区级，自动生成物，顶部标注勿手工编辑）：规则索引表 +
+  逐条判定与修复 + 豁免机制（`@audit-ignore <code>`）+ 三种使用方式。
+- MCP `quality_audit` 新增 `list_rules=true`：不执行审计，直接返回 20 条规则目录
+  （供 AI 写码前自查，与 CLI 同源同口径）。
+- 用途：补齐「AI/人写码前的自检清单」这一协作缺口——此前 20 条高质量规则只存在于引擎常量里，
+  写码者须逐份翻 AGENTS.md 与各 SKILL.md 才能拼出检查项。
+
 ## [v3.21.1] - 2026-09-12
 
 ### fix(test): test:crud-designer --pipeline 自清理收口（真实零残留）

@@ -46,7 +46,8 @@ class AuditCollection implements McpToolCollectionInterface
             [
                 'name' => 'quality_audit',
                 'description' => '工程质量审计（rocareer 基础设施包）：PHP 语法 / 控制器规范 / 权限节点 / 全工作区跨包迁移时间戳查重（migrations/pg-migrations） / 残留扫描 / 版本同步及其他工程门禁。'
-                    . '重量级操作（秒级）；detail 默认 false 仅返回摘要，true 附带问题明细。',
+                    . '重量级操作（秒级）；detail 默认 false 仅返回摘要，true 附带问题明细。'
+                    . 'list_rules=true 时不执行审计，改为返回规则目录（含每条判定标准与修复指引），供写码前自查。',
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
@@ -54,6 +55,7 @@ class AuditCollection implements McpToolCollectionInterface
                         'pkg' => ['type' => 'string', 'description' => '仅审计单个包（缺省全部默认包）'],
                         'codes' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => '规则子集（缺省全部）：php_syntax/controller/permission/migration/residue/version/web_page/async_blocking/fqcn_dup/superglobal/dead_code/cross_copy/dto_contract/llm_gate/orm_migrated/event_standard/common_utils/install_standard'],
                         'detail' => ['type' => 'boolean', 'description' => '是否附带问题明细（缺省 false）'],
+                        'list_rules' => ['type' => 'boolean', 'description' => '只列规则目录（含判定标准与修复指引），不执行审计（缺省 false）'],
                     ],
                 ],
             ],
@@ -67,6 +69,30 @@ class AuditCollection implements McpToolCollectionInterface
     {
         if ($name !== 'quality_audit') {
             return ['isError' => true, 'content' => [['type' => 'text', 'text' => "unknown tool: {$name}"]]];
+        }
+
+        // 只列规则目录（供写码前自查；不执行审计，也不需要 root）
+        if (!empty($arguments['list_rules'])) {
+            $lines = [];
+            $i = 0;
+            foreach (AuditService::RULES as $code => $meta) {
+                $i++;
+                $lines[] = $i . '. ' . $meta['title'] . ' (#' . $code . ')';
+                $lines[] = '   ' . $meta['description'];
+            }
+            $text = implode("\n", $lines);
+            return [
+                'result' => [
+                    'text' => $text,
+                    'count' => count(AuditService::RULES),
+                    'rules' => array_map(
+                        static fn ($code, $meta) => ['code' => $code, 'title' => $meta['title'], 'description' => $meta['description']],
+                        array_keys(AuditService::RULES),
+                        array_values(AuditService::RULES)
+                    ),
+                ],
+                'display_message' => '审计规则目录：' . count(AuditService::RULES) . ' 条',
+            ];
         }
 
         $service = new AuditService();
