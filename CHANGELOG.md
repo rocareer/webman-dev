@@ -1,3 +1,18 @@
+## [v3.23.0] - 2026-09-15
+
+### feat(audit): 新增 icon_attr 规则——el 组件 icon 属性禁传 CSS 类名
+
+- **规则**：`.vue` 内 `icon="fa*"` / `:icon="fa*"` / `:icon="'fa*'"` 属性传 font-awesome 类名
+  即报错——Element Plus 按组件渲染 icon 属性，传类名字符串会 `createElement('fa fa-...')`
+  抛 InvalidCharacterError，页面白屏且此后所有菜单点击空白（dataio 导入向导 v1.0.5 与
+  print-erp 双实证）。
+- **正解**：`<Icon name="fa fa-*" />` 子节点（Icon 经 `common.ts` 全局注册）或已注册组件名；
+  script 段给菜单 icon 字段赋类名（`items.icon = 'fa fa-circle-o'`）为合法场景，lookbehind
+  排除 `.`/`-` 前缀（属性访问与 `data-icon`），防误报（colleague/print-erp 实测四误报已消除）。
+- **盲区 sweep**（radmin 条目承载，与 happ_frontend 同款）：dev 宿主工程 web 树、
+  super/web/src、skyline 每轮一次；实测 719 盲区 .vue 零命中 + 阳性金丝雀精确咬人。
+- 文件标注 `@audit-ignore icon_attr` 显式豁免；种子迁移 `20260915035817`（幂等 + hasTable 守卫）。
+
 ## [v3.22.0] - 2026-09-12
 
 ### feat(audit): 规则自检清单自动生成 + MCP list_rules（FACTORY P3）

@@ -39,6 +39,7 @@ class AuditService
         'common_utils' => ['title' => '通用工具真源门禁（禁止重复造轮子）', 'description' => '通用工具真源门禁（见 docs/common-utils-registry.md）：已知手写重复模式必须用 radmin 全局函数——max(1, min(100 → clamp_limit、分页 max(1, (int) → clamp_page、keyword/quickSearch 兼容链 → request_keyword、where 闭包多字段 like → keyword_like、json_encode(UNICODE|SLASHES) → json_unicode、strtr(base64_encode → base64url_encode、md5(uniqid → uuid7、固定四星掩码 → mask_secret；真源定义文件（radmin functions.php）与审计引擎自身源文件豁免；文件标注 @audit-ignore common_utils 显式豁免'],
         'comsearch_contract' => ['title' => '高级检索契约门禁（comSearch 基础能力）', 'description' => '高级检索/排序是 radmin 基础能力（Backend::applyListQueryContract 一行接入）：admin 控制器禁止手写解析 comSearch 的 search 数组（->input(\'search\')）——各处自研解析是静默腐烂高发区（print-erp 16 控制器全灭、crontab Log val/value 键错位对标准 comSearch 无效且 int/enum 列收非法串 500、slides Deck $limit 未定义变量分页大小恒默认等实证）；文件标注 @audit-ignore comsearch_contract 豁免（跨表字段别名等正当映射场景，须注释理由）'],
         'install_standard' => ['title' => 'Install.php 标准化', 'description' => 'Install.php 标准化门禁（见 docs/install-standard.md）：WEBMAN_PLUGIN 常量、install/update/uninstall 三钩子齐全、install 签名兼容官方 Install::install(true)（禁强类型参数）、禁官方骨架残留 copy_dir/remove_dir（显式 overwrite=true 的 copy_dir 除外）与 array() 语法、类前中文头注释；文件标注 @audit-ignore install_standard 显式豁免'],
+        'icon_attr' => ['title' => 'el 组件 icon 属性禁传 CSS 类名', 'description' => 'Element Plus 组件 icon 类属性（icon/:icon）按组件渲染：传 fa fa-* 等类名字符串会 createElement(类名) 抛 InvalidCharacterError，页面白屏且此后所有菜单点击空白（dataio 导入向导与 print-erp 双实证）；.vue 内 icon="fa / :icon="fa / :icon="形式即报；合法形态 = <Icon name="fa fa-*" /> 子节点（Icon 经 common.ts 全局注册）或已注册组件名；radmin 同步树跳过（真源在各包 web/），dev 宿主工程 web 树、super/web/src、skyline 盲区由 radmin 条目承载 sweep；文件标注 @audit-ignore icon_attr 显式豁免'],
     ];
 
     /** 问题明细入库/返回上限（完整数量在 count） */
@@ -49,6 +50,9 @@ class AuditService
 
     /** 此轮全域前端盲区扫描结果（radmin 条目承载，audit() 内重置） */
     protected ?array $happBlindScan = null;
+
+    /** 此轮 icon 属性盲区扫描结果（radmin 条目承载，audit() 内重置） */
+    protected ?array $iconBlindScan = null;
 
     /** 本轮已归属过迁移冲突的时间戳（避免全量审计重复报错） */
     protected array $reportedMigrationStamps = [];
@@ -138,6 +142,7 @@ class AuditService
     {
         $this->migrationScan = null;
         $this->happBlindScan = null;
+        $this->iconBlindScan = null;
         $this->reportedMigrationStamps = [];
         // 常驻进程（MCP worker / 后台管理页）跨轮次复用本引擎：每轮清空静态扫描缓存，
         // 否则改码后 quality_audit 仍读上一轮文件快照 → 假 PASS/假 FAIL
@@ -163,6 +168,7 @@ class AuditService
             'common_utils' => 'no src dir / no radmin dependency (pure SDK)',
             'install_standard' => 'no src/Install.php',
             'comsearch_contract' => 'no admin controllers',
+            'icon_attr' => 'web sources: none',
         ];
         $packages = [];
         foreach ($pkgs as $name) {
@@ -805,6 +811,96 @@ class AuditService
         }
         $result = ['issues' => $issues, 'note' => $checked . ' blind-tree files (dev/super/skyline)'];
         $this->happBlindScan = $result;
+        return $result;
+    }
+
+
+    /* ---------- 7c. Element Plus icon 属性门禁 ---------- */
+
+    /**
+     * Element Plus 组件 icon 类属性禁传 CSS 类名（dataio 导入向导 / print-erp 双白屏实证规则）：
+     * el-button 等组件的 icon / :icon 属性按组件渲染，传 'fa fa-*' 等类名字符串会
+     * createElement('fa fa-...') 抛 InvalidCharacterError——页面白屏且此后所有菜单点击空白。
+     * 扫描各包 web/src 的 .vue 模板；radmin 同步树（真源在各包 web/）跳过，
+     * dev 宿主工程 web 树、super/web/src、skyline 盲区由 radmin 条目承载 sweepIconAttrBlind。
+     * 文件标注 @audit-ignore icon_attr 显式豁免。
+     */
+    protected function checkIconAttr(string $root, string $pkg, string $dir): ?array
+    {
+        if ($pkg === 'radmin') {
+            return $this->sweepIconAttrBlind($root);
+        }
+        $webDir = "$dir/web/src";
+        if (!is_dir($webDir)) {
+            return null;
+        }
+        $issues = [];
+        $checked = 0;
+        foreach ($this->webSourceFiles($webDir) as $file) {
+            if (pathinfo($file, PATHINFO_EXTENSION) !== 'vue') {
+                continue;
+            }
+            $src = file_get_contents($file);
+            if (str_contains($src, '@audit-ignore icon_attr')) {
+                continue;
+            }
+            $checked++;
+            $rel = str_replace($root . '/', '', $file);
+            if (preg_match('~(?<![\w.:-])\s*:?\s*icon\s*=\s*["\x27]["\x27]?(?:fa[bdrs]?)[\s-]~', $src)) {
+                $issues[] = "$rel: el 组件 icon 属性传 CSS 类名（Element Plus 按组件渲染该字符串即 createElement 抛错：页面白屏且带崩 SPA；改 <Icon name=\"fa fa-*\" /> 子节点，Icon 全局注册）";
+            }
+        }
+        return ['issues' => $issues, 'note' => $checked . ' vue files (web/src)'];
+    }
+
+    /**
+     * icon 属性全域盲区扫描（radmin 条目承载）：dev 宿主工程 web 源码树、super/web/src、
+     * skyline 不属于任何 src 包，包级规则扫不到（与 sweepHappFrontendBlind 同款盲区先例）。
+     * 每轮审计只扫一次（实例缓存，audit() 内重置）；只扫 .vue，node_modules/dist/public 等
+     * 产物目录豁免，文件标注 @audit-ignore icon_attr 显式豁免。
+     */
+    protected function sweepIconAttrBlind(string $root): ?array
+    {
+        if ($this->iconBlindScan !== null) {
+            return $this->iconBlindScan;
+        }
+        $ws = dirname($root);
+        $trees = [];
+        foreach (array_merge(
+            glob($ws . '/dev/*/web/src') ?: [],
+            glob($ws . '/super/web/src') ?: [],
+            glob($ws . '/skyline') ?: []
+        ) as $tree) {
+            if (is_dir($tree)) {
+                $trees[] = $tree;
+            }
+        }
+        if (count($trees) === 0) {
+            return null;
+        }
+        $issues = [];
+        $checked = 0;
+        foreach ($trees as $tree) {
+            foreach ($this->webSourceFiles($tree) as $file) {
+                if (preg_match('#/(node_modules|dist|public|unpackage|miniprogram_npm|vendor)/#', $file)) {
+                    continue;
+                }
+                if (pathinfo($file, PATHINFO_EXTENSION) !== 'vue') {
+                    continue;
+                }
+                $src = file_get_contents($file);
+                if (str_contains($src, '@audit-ignore icon_attr')) {
+                    continue;
+                }
+                $checked++;
+                $rel = str_replace($ws . '/', '', $file);
+                if (preg_match('~(?<![\w.:-])\s*:?\s*icon\s*=\s*["\x27]["\x27]?(?:fa[bdrs]?)[\s-]~', $src)) {
+                    $issues[] = "$rel: el 组件 icon 属性传 CSS 类名（Element Plus 按组件渲染该字符串即 createElement 抛错：页面白屏且带崩 SPA；改 <Icon name=\"fa fa-*\" /> 子节点）";
+                }
+            }
+        }
+        $result = ['issues' => $issues, 'note' => $checked . ' blind-tree vue files (dev/super/skyline)'];
+        $this->iconBlindScan = $result;
         return $result;
     }
 
