@@ -1,3 +1,9 @@
+## [v3.23.1] - 2026-09-15
+
+### chore(audit): 默认包清单 experiment → psyvoyage（包改名跟随）
+
+PsyVoyage 改名（原 rocareer/experiment，目录 src/experiment → src/psyvoyage），
+audit 默认包清单同步；`--pkg=psyvoyage` 生效，旧键移除。
 ## [v3.23.0] - 2026-09-15
 
 ### feat(audit): 新增 icon_attr 规则——el 组件 icon 属性禁传 CSS 类名
