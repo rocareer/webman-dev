@@ -32,7 +32,7 @@ class RadminWebmanDevAuditVueThemeHardcodeRule extends AbstractMigration
                 [
                     'name' => 'vue_theme_hardcode',
                     'title' => 'Vue 主题色硬编码门禁（EP 调色板）',
-                    'description' => 'Element Plus 官方默认调色板色值（#409eff/#67c23a/#e6a23c/#f56c6c/#909399/#ecf5ff/#d9ecff）写死在 .vue 的 <style>/<template> 段 = 本该走主题变量的语义色被固化——用户切换主题色/暗色模式后与全站脱节（print-erp flow 节点状态色实证，2026-09-17 前端全域样式审计）；合法形态 = var(--el-color-*, 色值) 带 fallback 双写（扫描前剔除再匹配）；<script> 段不扫（ECharts/SVG 画布色板属运行时配置，主题跟随可选 getComputedStyle 快照）；打印纸张预览区白底语义属有意设计，注释声明即可；扫描范围 = dev 宿主工程 web 树（radmin 条目承载 sweep），相对路径在 radmin/web/src 存在同路径文件的「全家桶继承页」跳过（真源在 radmin，上游存量不由宿主修），src 各包 web 树存量待自行收口后开启；文件标注 @audit-ignore vue_theme_hardcode 显式豁免',
+                    'description' => 'Element Plus 官方默认调色板色值（#409eff/#67c23a/#e6a23c/#f56c6c/#909399/#ecf5ff/#d9ecff）写死在 .vue 的 <style>/<template> 段 = 主题语义色被固化，切主题色/暗色后与全站脱节（print-erp flow 节点实证，2026-09-17 前端全域样式审计）；合法形态 = var(--el-color-*, 色值) fallback 双写（扫描前剔除再匹配）；<script> 段不扫（画布色板属运行时配置）；打印纸张预览白底语义注释声明即可；扫描范围 = dev 宿主 web 树（radmin 条目承载 sweep），radmin/web/src 同路径「全家桶继承页」跳过（真源在 radmin），src 各包存量收口后开启；标注 @audit-ignore vue_theme_hardcode 显式豁免',
                     'status' => 'enabled',
                     'weigh' => 82,
                     'remark' => '',
