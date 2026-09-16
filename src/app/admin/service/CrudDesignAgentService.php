@@ -238,7 +238,7 @@ class CrudDesignAgentService
     protected function callLlm(string $agentKey, array $messages): string
     {
         $gatewayClass = '\\app\\agent\\support\\AgentGateway';
-        $response = (new $gatewayClass())->chat($agentKey, $messages, ['max_tokens' => 8192], 'queue');
+        $response = (new $gatewayClass())->chat($agentKey, $messages, ['max_tokens' => 16384], 'queue');
         $content = (string) ($response['result']['choices'][0]['message']['content'] ?? '');
         if ($content === '') {
             throw new \RuntimeException('LLM 返回为空（content 空串，建议放大预算排查渠道）');
