@@ -40,6 +40,7 @@ class AuditService
         'comsearch_contract' => ['title' => '高级检索契约门禁（comSearch 基础能力）', 'description' => '高级检索/排序是 radmin 基础能力（Backend::applyListQueryContract 一行接入）：admin 控制器禁止手写解析 comSearch 的 search 数组（->input(\'search\')）——各处自研解析是静默腐烂高发区（print-erp 16 控制器全灭、crontab Log val/value 键错位对标准 comSearch 无效且 int/enum 列收非法串 500、slides Deck $limit 未定义变量分页大小恒默认等实证）；文件标注 @audit-ignore comsearch_contract 豁免（跨表字段别名等正当映射场景，须注释理由）'],
         'install_standard' => ['title' => 'Install.php 标准化', 'description' => 'Install.php 标准化门禁（见 docs/install-standard.md）：WEBMAN_PLUGIN 常量、install/update/uninstall 三钩子齐全、install 签名兼容官方 Install::install(true)（禁强类型参数）、禁官方骨架残留 copy_dir/remove_dir（显式 overwrite=true 的 copy_dir 除外）与 array() 语法、类前中文头注释；文件标注 @audit-ignore install_standard 显式豁免'],
         'icon_attr' => ['title' => 'el 组件 icon 属性禁传 CSS 类名', 'description' => 'Element Plus 组件 icon 类属性（icon/:icon）按组件渲染：传 fa fa-* 等类名字符串会 createElement(类名) 抛 InvalidCharacterError，页面白屏且此后所有菜单点击空白（dataio 导入向导与 print-erp 双实证）；.vue 内 icon="fa / :icon="fa / :icon="形式即报；合法形态 = <Icon name="fa fa-*" /> 子节点（Icon 经 common.ts 全局注册）或已注册组件名；radmin 同步树跳过（真源在各包 web/），dev 宿主工程 web 树、super/web/src、skyline 盲区由 radmin 条目承载 sweep；文件标注 @audit-ignore icon_attr 显式豁免'],
+        'vue_theme_hardcode' => ['title' => 'Vue 主题色硬编码门禁（EP 调色板）', 'description' => 'Element Plus 官方默认调色板色值（#409eff/#67c23a/#e6a23c/#f56c6c/#909399/#ecf5ff/#d9ecff）写死在 .vue 的 <style>/<template> 段 = 本该走主题变量的语义色被固化——用户切换主题色/暗色模式后与全站脱节（print-erp flow 节点状态色实证，2026-09-17 前端全域样式审计）；合法形态 = var(--el-color-*, 色值) 带 fallback 双写（扫描前剔除再匹配）；<script> 段不扫（ECharts/SVG 画布色板属运行时配置，主题跟随可选 getComputedStyle 快照）；打印纸张预览区白底语义属有意设计，注释声明即可；扫描范围 = dev 宿主工程 web 树（radmin 条目承载 sweep），相对路径在 radmin/web/src 存在同路径文件的「全家桶继承页」跳过（真源在 radmin，上游存量不由宿主修），src 各包 web 树存量待自行收口后开启；文件标注 @audit-ignore vue_theme_hardcode 显式豁免'],
     ];
 
     /** 问题明细入库/返回上限（完整数量在 count） */
@@ -53,6 +54,9 @@ class AuditService
 
     /** 此轮 icon 属性盲区扫描结果（radmin 条目承载，audit() 内重置） */
     protected ?array $iconBlindScan = null;
+
+    /** 此轮 Vue 主题色硬编码盲区扫描结果（radmin 条目承载，audit() 内重置） */
+    protected ?array $themeBlindScan = null;
 
     /** 本轮已归属过迁移冲突的时间戳（避免全量审计重复报错） */
     protected array $reportedMigrationStamps = [];
@@ -143,6 +147,7 @@ class AuditService
         $this->migrationScan = null;
         $this->happBlindScan = null;
         $this->iconBlindScan = null;
+        $this->themeBlindScan = null;
         $this->reportedMigrationStamps = [];
         // 常驻进程（MCP worker / 后台管理页）跨轮次复用本引擎：每轮清空静态扫描缓存，
         // 否则改码后 quality_audit 仍读上一轮文件快照 → 假 PASS/假 FAIL
@@ -169,6 +174,7 @@ class AuditService
             'install_standard' => 'no src/Install.php',
             'comsearch_contract' => 'no admin controllers',
             'icon_attr' => 'web sources: none',
+            'vue_theme_hardcode' => 'web sources: none',
         ];
         $packages = [];
         foreach ($pkgs as $name) {
@@ -902,6 +908,100 @@ class AuditService
         $result = ['issues' => $issues, 'note' => $checked . ' blind-tree vue files (dev/super/skyline)'];
         $this->iconBlindScan = $result;
         return $result;
+    }
+
+    /* ---------- 7d. Vue 主题色硬编码门禁（EP 调色板） ---------- */
+
+    /**
+     * Element Plus 官方默认调色板硬编码检查（print-erp 前端全域样式审计 2026-09-17 实证规则）：
+     * .vue 的 <style>/<template> 段写死 #409eff 等主题语义色 = 用户切换主题色/暗色模式后与全站脱节
+     * （print-erp flow 节点状态色实证）。合法形态 = var(--el-color-*, 色值) 带 fallback 双写（先剔除再扫）；
+     * <script> 段不扫（ECharts/SVG 画布色板属运行时配置，主题跟随可选 getComputedStyle 快照）。
+     * 扫描范围 = dev 宿主工程 web 树（radmin 条目承载 sweep，与 sweepIconAttrBlind 同款盲区先例）：
+     * 相对路径在 radmin/web/src 存在同路径文件的「全家桶继承页」跳过（真源在 radmin，上游存量不由宿主修）；
+     * src 各包 web 树存量（agent/ai/happ/mcp/psyvoyage 共 9 文件）待各包自行收口后开启。
+     * 文件标注 @audit-ignore vue_theme_hardcode 显式豁免。
+     */
+    protected function checkVueThemeHardcode(string $root, string $pkg, string $dir): ?array
+    {
+        if ($pkg === 'radmin') {
+            return $this->sweepVueThemeHardcodeBlind($root);
+        }
+        return null;
+    }
+
+    /**
+     * 主题色硬编码全域盲区扫描（radmin 条目承载）：dev 宿主工程 web 源码树不属于任何 src 包，
+     * 包级规则扫不到（与 sweepHappFrontendBlind 同款盲区先例）。每轮审计只扫一次（实例缓存，
+     * audit() 内重置）；只扫 .vue，产物目录豁免，radmin 同源继承页与 @audit-ignore vue_theme_hardcode 豁免。
+     */
+    protected function sweepVueThemeHardcodeBlind(string $root): ?array
+    {
+        if ($this->themeBlindScan !== null) {
+            return $this->themeBlindScan;
+        }
+        $ws = dirname($root);
+        $radminWeb = $ws . '/src/radmin/web/src';
+        $trees = [];
+        foreach (glob($ws . '/dev/*/web/src') ?: [] as $tree) {
+            if (is_dir($tree)) {
+                $trees[] = $tree;
+            }
+        }
+        if (count($trees) === 0) {
+            return null;
+        }
+        $issues = [];
+        $checked = 0;
+        $skipped = 0;
+        foreach ($trees as $tree) {
+            foreach ($this->webSourceFiles($tree) as $file) {
+                if (preg_match('#/(node_modules|dist|public|unpackage|miniprogram_npm|vendor)/#', $file)) {
+                    continue;
+                }
+                if (pathinfo($file, PATHINFO_EXTENSION) !== 'vue') {
+                    continue;
+                }
+                $src = file_get_contents($file);
+                if (str_contains($src, '@audit-ignore vue_theme_hardcode')) {
+                    continue;
+                }
+                // 全家桶继承页：相对路径在 radmin 真源树存在同路径文件 → 归属 radmin，不在宿主报
+                $relToSrc = substr($file, strlen($tree) + 1);
+                if (is_file($radminWeb . '/' . $relToSrc)) {
+                    $skipped++;
+                    continue;
+                }
+                $checked++;
+                $hit = $this->vueThemeHardcodeHit($src);
+                if ($hit !== '') {
+                    $rel = str_replace($ws . '/', '', $file);
+                    $issues[] = "$rel: $hit";
+                }
+            }
+        }
+        $result = ['issues' => $issues, 'note' => $checked . ' business vue files (' . $skipped . ' inherited-from-radmin skipped)'];
+        $this->themeBlindScan = $result;
+        return $result;
+    }
+
+    /**
+     * 提取 <style>/<template> 段、剔除 var(--el-*, #fallback) 合格双写形态后匹配 EP 默认调色板；
+     * 命中返回问题描述，无命中返回空串。
+     */
+    protected function vueThemeHardcodeHit(string $src): string
+    {
+        if (!preg_match_all('~<(style|template)\b[^>]*>([\s\S]*?)</\1>~is', $src, $m)) {
+            return '';
+        }
+        $palette = '~#(?:409eff|67c23a|e6a23c|f56c6c|909399|ecf5ff|d9ecff)~i';
+        foreach ($m[2] as $body) {
+            $body = preg_replace('~var\(--el-[a-z0-9-]+,\s*#[0-9a-fA-F]{3,8}\)~', '', $body);
+            if (preg_match($palette, $body)) {
+                return '样式段写死 EP 默认调色板色值（主题色/暗色切换后与全站脱节）：改 var(--el-color-*, 色值) 双写；打印纸张预览区白底语义属有意设计，请加注释声明';
+            }
+        }
+        return '';
     }
 
 

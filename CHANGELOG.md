@@ -1,3 +1,22 @@
+## [v3.24.0] - 2026-09-17
+
+### feat(audit): 新增 vue_theme_hardcode 规则——Vue 样式段 EP 调色板硬编码门禁（print-erp 前端全域样式审计实证）
+
+- `AuditService::RULES` 新增第 22 条规则 `vue_theme_hardcode`：`.vue` 的 `<style>`/`<template>` 段写死
+  Element Plus 官方默认调色板（`#409eff/#67c23a/#e6a23c/#f56c6c/#909399/#ecf5ff/#d9ecff`）即报——
+  主题语义色被固化，用户切换主题色/暗色模式后与全站脱节（print-erp flow 节点状态色实证，
+  工作区 TASK-20260917-013/019 前端全域样式审计）。
+- 合法形态 = `var(--el-color-*, 色值)` 带 fallback 双写（扫描前剔除再匹配）；`<script>` 段不扫
+  （ECharts/SVG 画布色板属运行时配置，主题跟随可选 getComputedStyle 快照）。
+- 扫描范围 = dev 宿主工程 web 树（radmin 条目承载 `sweepVueThemeHardcodeBlind`，与 icon_attr 盲区
+  先例同构，每轮一次实例缓存）；相对路径在 `radmin/web/src` 存在同路径文件的「全家桶继承页」跳过
+  （真源在 radmin，上游存量不由宿主修）；src 各包 web 树存量（agent/ai/happ/mcp/psyvoyage 共 9 文件）
+  待各包自行收口后开启；文件标注 `@audit-ignore vue_theme_hardcode` 显式豁免。
+- 实测：print-erp 修复后 PASS（222 业务页扫描 / 914 继承页豁免计数正确）；反证抓到 print-erp-drill
+  演练树 2 处真阳性（同步修复后全绿）。配套种子迁移
+  `20260917033425_radmin_webman_dev_audit_vue_theme_hardcode_rule.php`（幂等按 name 去重）。
+- 纪律全文沉淀 buildadmin-web 技能「按钮与主题纪律」章节（含 el-button 必带 v-blur 等四条）。
+
 ## [v3.23.3] - 2026-09-16
 
 ### fix(budget): CRUD 设计 agent 输出预算 8192 → 16384（老板定版「8192×2」）
