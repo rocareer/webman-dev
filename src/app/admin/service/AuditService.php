@@ -2222,7 +2222,7 @@ class AuditService
                     if ($ret === '' || $ret === '?void') {
                         $bad[] = '缺少返回类型 : void';
                     } elseif ($ret !== 'void') {
-                        $bad[] = "返回类型应为 : void（当前 : $ret）";
+                        $bad[] = "返回类型应为 : void（当前 : {$ret}）";
                     }
                     if ($bad) {
                         $issues[] = "$rel:" . ($i + 1) . ": 监听器 {$method}() " . implode('；', $bad);
