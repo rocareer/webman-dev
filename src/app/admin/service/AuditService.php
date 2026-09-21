@@ -213,12 +213,16 @@ class AuditService
     /** 本包某规则的豁免理由（workspace [单元=>[码=>理由]] 与包级 [码=>理由]；null = 不豁免） */
     protected function auditSkipReason(string $root, string $dir, string $pkg, string $code): ?string
     {
-        $ws = (array) ($this->workspaceAuditConfig($root)['skip'] ?? []);
-        $reason = (array) ($ws[$pkg] ?? [])[$code] ?? null;
+        // 注意：不要写 `(array) ($ws[$pkg] ?? [])[$code] ?? null`——cast 比下标先吃操作数，
+        // `??` 罩不到下标读取，空配置时直接 "Undefined array key"（v3.27.0 实测回归）。
+        $wsSkip = (array) ($this->workspaceAuditConfig($root)['skip'] ?? []);
+        $wsForPkg = isset($wsSkip[$pkg]) && is_array($wsSkip[$pkg]) ? $wsSkip[$pkg] : [];
+        $reason = $wsForPkg[$code] ?? null;
         if (is_string($reason) && $reason !== '') {
             return $reason;
         }
-        $reason = (array) ($this->packageAuditConfig($dir)['skip'] ?? [])[$code] ?? null;
+        $pkgSkip = (array) ($this->packageAuditConfig($dir)['skip'] ?? []);
+        $reason = $pkgSkip[$code] ?? null;
         return is_string($reason) && $reason !== '' ? $reason : null;
     }
 
