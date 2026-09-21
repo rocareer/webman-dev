@@ -15,7 +15,12 @@
     "php": ">=8.1",
     "rocareer/radmin": "^3.1 || ^4.0 || ^5.0"
   },
-  "autoload": {
+  "suggest": {
+        "rocareer/mcp": "CRUD 设计工具集合（CrudCollection）注册到 mcp 时使用",
+        "rocareer/agent": "CRUD 设计智能体（CrudDesignAgentService）软依赖",
+        "rocareer/happ-client": "CRUD 设计进度推送（CrudDesignPusher）软依赖"
+    },
+    "autoload": {
     "psr-4": {
       "Rocareer\\WebmanDev\\": "src",
       "app\\": "src/app"

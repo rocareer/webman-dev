@@ -1,3 +1,10 @@
+## [3.26.4] - 2026-09-21
+
+### fix(chore): 补登记三处软依赖（mcp / agent / happ-client）
+
+- `config/plugin/rocareer/webman-dev/event.php` 注册 `\app\mcp\collection\CrudCollection`；
+  `CrudDesignPusher`/`CrudDesignAgentService` 以守卫引用 happ-client / agent —— 均为软依赖，补 suggest。
+
 ## [v3.26.3] - 2026-09-21
 
 ### fix(audit): rolling 布局下命令/任务类不算死代码（框架自动发现/按 DB 任务表实例化）
