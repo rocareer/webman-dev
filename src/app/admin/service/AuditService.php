@@ -172,9 +172,15 @@ class AuditService
 
     /**
      * 定位包目录（大小写不敏感：OIDC 等目录名与包名大小写可能不一致）
+     *
+     * rolling 布局：`app` = 主应用（单元根即工作区根），其余名字 = `plugin/<名>` 业务插件。
      */
     public function pkgDir(string $root, string $name): string
     {
+        $root = rtrim($root, '/');
+        if ($this->isRollingWorkspace($root)) {
+            return strtolower($name) === 'app' ? $root : "$root/plugin/$name";
+        }
         if (is_dir("$root/$name")) {
             return "$root/$name";
         }
@@ -184,6 +190,26 @@ class AuditService
             }
         }
         return "$root/$name";
+    }
+
+    /**
+     * 缺省审计单元列表（按布局）
+     *
+     * family  → DEFAULT_PACKAGES（家族基础设施包名，历史行为）
+     * rolling → 工作区自身单元：`app`（主应用）+ 各 `plugin/<名>`（业务插件）
+     */
+    public function defaultUnits(string $root): array
+    {
+        $root = rtrim($root, '/');
+        if (!$this->isRollingWorkspace($root)) {
+            return self::DEFAULT_PACKAGES;
+        }
+        $units = ['app'];
+        foreach (glob("$root/plugin/*", GLOB_ONLYDIR) ?: [] as $dir) {
+            $units[] = basename($dir);
+        }
+        sort($units);
+        return $units;
     }
 
     /**

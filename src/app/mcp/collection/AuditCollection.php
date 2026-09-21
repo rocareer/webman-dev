@@ -108,7 +108,7 @@ class AuditCollection implements McpToolCollectionInterface
 
         $pkgs = isset($arguments['pkg']) && $arguments['pkg'] !== ''
             ? [(string) $arguments['pkg']]
-            : AuditService::DEFAULT_PACKAGES;
+            : $service->defaultUnits($root);
         $codes = array_values(array_filter((array) ($arguments['codes'] ?? []), 'is_string'));
         $detail = (bool) ($arguments['detail'] ?? false);
 

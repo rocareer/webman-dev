@@ -58,7 +58,8 @@ class Audit extends Command
             return self::FAILURE;
         }
         $output->writeln('<info>rocareer:audit @ ' . $root . '</info>');
-        $pkgs = $input->getOption('pkg') ? [$input->getOption('pkg')] : self::DEFAULT_PACKAGES;
+        // 缺省单元列表按布局取：family = 家族包名；rolling = app + 各 plugin/<名>
+        $pkgs = $input->getOption('pkg') ? [$input->getOption('pkg')] : $service->defaultUnits($root);
 
         $result = $service->audit($root, $pkgs);
         $done = [];

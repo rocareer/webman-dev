@@ -1,3 +1,17 @@
+## [v3.26.1] - 2026-09-21
+
+### fix(audit): Rolling 布局补「单元列表」——`app` + 各 `plugin/<名>`（v3.26.0 适配器的收口件）
+
+v3.26.0 让 `--root=<Rolling>` 能进规则，但缺省单元列表仍是家族包名（radmin/ai/memory/…），
+实测吃 29 条 coverage FAIL（「包目录不存在」）——**ROOT 认了、单元对不上**。
+
+- `AuditService::defaultUnits($root)`：family → `DEFAULT_PACKAGES`（历史行为不变）；
+  rolling → `app`（主应用，单元根 = 工作区根）+ 各 `plugin/<名>`（按名排序）。
+- `AuditService::pkgDir()`：rolling 下 `app` → 工作区根、其余 → `plugin/<名>`。
+- 接线三处：`rocareer:audit` 命令、MCP `quality_audit` 工具、后台审计页共用同一取数（走 service，不再各自读常量）。
+- 回归：family 布局（`--root=<vendor/rocareer> --pkg=radmin|webman-dev`）输出与 v3.26.0 一致；
+  rolling 布局实测无 phantom 单元，规则进入真实扫描。
+
 ## [v3.26.0] - 2026-09-21
 
 ### feat(audit): 审计支持 Rolling 布局（`app/` + `plugin/<名>/app/**` 工作区）——22 条规则不再只认家族包 `src/`
