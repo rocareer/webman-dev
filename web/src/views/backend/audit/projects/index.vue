@@ -178,7 +178,7 @@ const toggleStatus = (row: anyObj) => {
         .then(async () => {
             await createAxios({ url: '/admin/audit.AuditProject/switch', method: 'post', data: { id: row.id, status } })
             ElMessage.success('操作成功')
-            baTable.onTableHeaderAction('refresh')
+            baTable.onTableHeaderAction('refresh', { event: 'switch', ids: [row.id] })
         })
         .catch(() => {})
 }

@@ -7,6 +7,8 @@
  *   [2] v2 增强：options -> comment 字典 / remote 关联字段 / form+table 字段级属性 /
  *       default_sort / form_layout 决定表单项顺序
  *   [3] CrudDesignService::sanitize 反幻觉净化（未知键丢弃、remote 缺 table 降级）
+ *   [2v3] v3 落位目标（target profile）：插件形态折叠「域/末段」、落位/路由/语言包纳入冲突预检、
+ *       无 target 落位不变、model_scope/controller_dir 覆盖、target 非法值与未知键处理
  *   [4] CrudDesignService::validate 结构化错误（缺 comment / 非法 design_type / 重复字段名 /
  *       未声明字段引用 / 关联缺表）
  *   [5] export 反向导出 round-trip（需宿主 DB 与已生成记录；无记录时跳过不判失败）
@@ -172,6 +174,56 @@ class TestCrudDesigner extends Command
             $this->assertSame('decimal', $amt['type'], '[2o] float 仍为 decimal', $pass, $fail);
         } catch (Throwable $e) {
             $fail[] = '[2] v2 断言异常：' . $e->getMessage();
+        }
+
+        // ---- [2v3] v3 落位目标（target profile） ----
+        try {
+            // 插件形态：多段表名折叠「域/末段」、后端落 plugin/<p>/app/**、菜单/语言包/路由随行
+            $v3 = [
+                'version' => 3,
+                'table' => ['name' => 'evaluation_run_funnel', 'comment' => '评测漏斗'],
+                'fields' => [
+                    ['name' => 'title', 'comment' => '标题', 'design_type' => 'input'],
+                    ['name' => 'status', 'comment' => '状态: 0=禁用,1=启用', 'design_type' => 'switch', 'default' => '1'],
+                ],
+                'target' => ['profile' => 'rolling-plugin', 'plugin' => 'evaluation', 'menu' => ['icon' => 'fa fa-filter']],
+            ];
+            $s3 = $svc->sanitize($v3);
+            $this->assertSame([], array_column($svc->validate($s3['design']), 'code'), '[3a] v3 插件形态设计无校验错误', $pass, $fail);
+            $this->assertSame('rolling-plugin', $s3['design']['target']['profile'] ?? '', '[3b] target.profile 保留', $pass, $fail);
+            $p3 = (new CrudDesigner())->parse($s3['design']);
+            $this->assertSame('evaluation/funnel', $p3['menu_name'], '[3c] 插件形态菜单 name 折叠为「域/末段」', $pass, $fail);
+            $this->assertSame('rolling-plugin', $p3['table']['target']['profile'] ?? '', '[3d] target 透传引擎 payload', $pass, $fail);
+            $files = CrudDesigner::targetFiles('evaluation_run_funnel', $s3['design']['target']);
+            $this->assertSame(true, in_array('plugin/evaluation/app/admin/controller/evaluation/Funnel.php', $files, true), '[3e] 控制器落位 plugin/<p>/app/admin/controller/<dir>/', $pass, $fail);
+            $this->assertSame(true, in_array('plugin/evaluation/app/model/EvaluationRunFunnel.php', $files, true), '[3f] 域模型落 plugin/<p>/app/model/<全表名驼峰>', $pass, $fail);
+            $this->assertSame(true, in_array('plugin/evaluation/app/validate/EvaluationRunFunnel.php', $files, true), '[3g] 验证器落 plugin/<p>/app/validate/', $pass, $fail);
+            $this->assertSame(true, in_array('plugin/evaluation/config/route.php', $files, true), '[3h] 路由文件纳入冲突预检', $pass, $fail);
+            $this->assertSame(true, in_array('plugin/evaluation/app/admin/lang/zh-cn/evaluation/funnel.php', $files, true), '[3i] 后端语言包纳入冲突预检', $pass, $fail);
+            $this->assertSame(true, in_array('web/src/views/backend/evaluation/funnel/index.vue', $files, true), '[3j] 页面落折叠后的目录', $pass, $fail);
+
+            // 缺省（无 target）= 历史 app/ 落位，逐项不变
+            $files0 = CrudDesigner::targetFiles('cc_student');
+            $this->assertSame('app/admin/controller/cc/Student.php', $files0[0], '[3k] 无 target 时落位不变（控制器）', $pass, $fail);
+            $this->assertSame('app/admin/model/cc/Student.php', $files0[1], '[3l] 无 target 时落位不变（模型）', $pass, $fail);
+
+            // model_scope=admin：后台专用模型/验证器落 app/admin/{model,validate}/
+            $filesAdmin = CrudDesigner::targetFiles('ops_job', ['profile' => 'rolling-plugin', 'plugin' => 'ops', 'controller_dir' => 'system', 'model_scope' => 'admin']);
+            $this->assertSame(true, in_array('plugin/ops/app/admin/model/system/Job.php', $filesAdmin, true), '[3m] model_scope=admin 落 app/admin/model/<dir>/', $pass, $fail);
+            $this->assertSame(true, in_array('plugin/ops/app/admin/controller/system/Job.php', $filesAdmin, true), '[3n] controller_dir 覆盖目录段', $pass, $fail);
+
+            // target 非法值：校验层给结构化错误（规则真源 = radmin Target）
+            $bad = $svc->sanitize(['version' => 3, 'table' => ['name' => 'cc_x', 'comment' => 'X'], 'fields' => [['name' => 'a', 'comment' => 'A', 'design_type' => 'input']], 'target' => ['profile' => 'rolling-plugin']]);
+            $codes = array_column($svc->validate($bad['design']), 'code');
+            $this->assertSame(true, in_array('TARGET_INVALID', $codes, true) || in_array('RADMIN_TARGET_UNSUPPORTED', $codes, true), '[3o] target 缺 plugin 报结构化错误', $pass, $fail);
+
+            // 未知键净化 + menu 子键白名单
+            $dirty3 = $svc->sanitize(['version' => 3, 'table' => ['name' => 'cc_x', 'comment' => 'X'], 'fields' => [['name' => 'a', 'comment' => 'A', 'design_type' => 'input']], 'target' => ['profile' => 'rolling-plugin', 'plugin' => 'cc', 'evil' => 1, 'menu' => ['icon' => 'fa fa-star', 'evil' => 2]]]);
+            $this->assertSame(false, array_key_exists('evil', $dirty3['design']['target'] ?? []), '[3p] target 未知键已丢弃', $pass, $fail);
+            $this->assertSame(false, array_key_exists('evil', $dirty3['design']['target']['menu'] ?? []), '[3q] target.menu 未知键已丢弃', $pass, $fail);
+            $this->assertSame('fa fa-star', $dirty3['design']['target']['menu']['icon'] ?? '', '[3r] target.menu.icon 保留', $pass, $fail);
+        } catch (Throwable $e) {
+            $fail[] = '[3] v3 target 断言异常：' . $e->getMessage();
         }
 
         // ---- [3] sanitize 反幻觉净化 ----

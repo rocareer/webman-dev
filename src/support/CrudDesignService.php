@@ -24,13 +24,25 @@ use InvalidArgumentException;
 class CrudDesignService
 {
     /** 当前设计态契约版本 */
-    public const VERSION = 2;
+    public const VERSION = 3;
 
     /** table 级允许键（白名单，其余丢弃并告警） */
     protected const TABLE_KEYS = [
         'name', 'comment', 'quick_search', 'form_fields', 'column_fields',
         'default_sort', 'is_common_model', 'form_layout',
     ];
+
+    /** v3 顶层 target 块允许键（落位目标，真源 = radmin app\admin\library\crud\Target） */
+    protected const TARGET_KEYS = [
+        'profile', 'plugin', 'controller_dir', 'model_scope', 'header', 'ddl',
+        'menu_migration', 'menu', 'route_file', 'backend_lang',
+    ];
+
+    /** target.menu 允许键 */
+    protected const TARGET_MENU_KEYS = ['enabled', 'parent', 'parent_title', 'icon', 'weigh', 'title'];
+
+    /** target.profile 白名单（与 radmin Target::PROFILES 同口径） */
+    public const TARGET_PROFILES = ['host-app', 'rolling-plugin'];
 
     /** field 级允许键（白名单，其余丢弃并告警） */
     protected const FIELD_KEYS = [
@@ -212,6 +224,44 @@ class CrudDesignService
         if (isset($raw['version'])) {
             $design['version'] = (int) $raw['version'];
         }
+        // v3 落位目标（反幻觉白名单：未知键丢弃、类型强转；严格规则在 validate 与引擎 Target 双层把守）
+        if (isset($raw['target'])) {
+            if (!is_array($raw['target'])) {
+                $warnings[] = 'target 非对象已忽略（应为 {profile,plugin,...}）';
+            } else {
+                $cleanTarget = [];
+                foreach ($raw['target'] as $k => $v) {
+                    if (!in_array($k, self::TARGET_KEYS, true)) {
+                        $warnings[] = "target 未知键已丢弃：{$k}";
+                        continue;
+                    }
+                    if ($k === 'menu') {
+                        if (!is_array($v)) {
+                            $warnings[] = 'target.menu 非对象已忽略';
+                            continue;
+                        }
+                        $menu = [];
+                        foreach ($v as $mk => $mv) {
+                            if (!in_array($mk, self::TARGET_MENU_KEYS, true)) {
+                                $warnings[] = "target.menu 未知键已丢弃：{$mk}";
+                                continue;
+                            }
+                            $menu[$mk] = $mk === 'enabled'
+                                ? (bool) $mv
+                                : ($mk === 'weigh' ? (int) $mv : trim((string) $mv));
+                        }
+                        $cleanTarget['menu'] = $menu;
+                        continue;
+                    }
+                    $cleanTarget[$k] = in_array($k, ['header', 'menu_migration', 'backend_lang'], true)
+                        ? (bool) $v
+                        : trim((string) $v);
+                }
+                if ($cleanTarget) {
+                    $design['target'] = $cleanTarget;
+                }
+            }
+        }
 
         return ['design' => $design, 'warnings' => $warnings];
     }
@@ -308,7 +358,35 @@ class CrudDesignService
                 }
             }
         }
+        // v3 落位目标：规则真源在 radmin Target（单一实现），此处只做委托 + 版本缺失提示
+        if (isset($design['target'])) {
+            $errors = array_merge($errors, $this->validateTarget((array) $design['target']));
+        }
         return $errors;
+    }
+
+    /**
+     * target 块校验（委托 radmin app\admin\library\crud\Target 的严格规则——规则单点维护，
+     * 与引擎执行期同一套；宿主 radmin 版本过低时给结构化升级提示而非静默放行）
+     *
+     * @param array $target 净化后的 target 块
+     * @return array<int, array{field: string, code: string, message: string}>
+     */
+    protected function validateTarget(array $target): array
+    {
+        if (!class_exists(\app\admin\library\crud\Target::class)) {
+            return [[
+                'field'   => 'target',
+                'code'    => 'RADMIN_TARGET_UNSUPPORTED',
+                'message' => '宿主 rocareer/radmin 版本过低：target 落位目标需 v5.10.0+（缺 app\admin\library\crud\Target），请 composer update rocareer/radmin',
+            ]];
+        }
+        try {
+            \app\admin\library\crud\Target::fromArray($target);
+        } catch (InvalidArgumentException $e) {
+            return [['field' => 'target', 'code' => 'TARGET_INVALID', 'message' => $e->getMessage()]];
+        }
+        return [];
     }
 
     /**

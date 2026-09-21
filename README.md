@@ -49,31 +49,54 @@ Install.php 规范等门禁。
 
 ## 命令：rocareer:make-crud — 标准 CRUD 模块生成（AI 友好）
 
-    php webman rocareer:make-crud --demo                          # 打印简化设计 JSON 示例
+    php webman rocareer:make-crud --demo                          # 打印设计 JSON 示例（v3 插件落位 + v1 app/ 落位）
     php webman rocareer:make-crud --design=/path/design.json      # 按设计 JSON 生成模块
+    php webman rocareer:make-crud --check --design=...            # 只预检：落位/冲突/图标实存/引擎/表结构，不落盘
 
-设计 JSON 极简（字段键：name/comment/design_type/length/required/default/primary_key；
-字典编码在 comment：`状态: 0=禁用,1=启用`）：
+设计 JSON（字段键：name/comment/design_type/length/required/default/primary_key；字典编码在 comment：`状态: 0=禁用,1=启用`）：
 
 ```json
 {
-  "table": { "name": "cc_student", "comment": "学员管理", "quick_search": ["name"] },
+  "version": 3,
+  "table": { "name": "memory_probe", "comment": "记忆探针管理", "quick_search": ["name"] },
   "fields": [
-    { "name": "name", "comment": "姓名", "design_type": "input", "length": 50, "required": true },
+    { "name": "name", "comment": "名称", "design_type": "input", "length": 50, "required": true },
     { "name": "status", "comment": "状态: 0=禁用,1=启用", "design_type": "switch", "default": "1" },
     { "name": "remark", "comment": "备注", "design_type": "textarea" }
-  ]
+  ],
+  "target": {
+    "profile": "rolling-plugin",
+    "plugin": "memory",
+    "menu": { "icon": "fa fa-flask", "parent": "system", "parent_title": "系统运维" }
+  }
 }
 ```
 
-流程：渲染 PG 幂等迁移（`database/migrations/<ts>_<table>_crud.php`，hasTable 守卫可 migrate:run 追溯）
-→ 调 radmin `app\admin\service\CrudService`（v5.1.0+，与后台 /admin/crud 同一引擎）生成
-控制器/模型/验证器 + 前端 index.vue/popupForm.vue + 语言包 + 菜单（幂等）；主键/时间戳列自动注入；
-菜单即时幂等种入（不写进迁移）。生成目标 = 运行命令的宿主工程（app/ 与 web/src/）。
+`target` 块（v3 可选；**不传 = 历史 app/ 落位，行为与 v2 逐字节一致**）决定「代码写到哪」：
 
-- 依赖：宿主需 radmin v5.1.0+（引擎服务化后）；表结构真源 = 迁移文件，请执行 `php webman migrate:run` 建表
-- 冲突保护：目标文件已存在默认中止（重复生成需 --force 覆盖，或后台 CRUD 记录删除后重生成）
-- 选项：`--no-migration`（表已自行准备）、`--force`、`--demo`
+| 键 | 取值 | 说明 |
+|---|---|---|
+| `profile` | `host-app`（缺省）/ `rolling-plugin` | 插件形态落 `plugin/<plugin>/app/**`，命名空间 `plugin\<plugin>\app\**` |
+| `plugin` | 插件名 | `rolling-plugin` 必填；表名建议 `ra_<plugin>_*` |
+| `controller_dir` | 目录段（缺省 = 插件名） | 控制器目录/URL/菜单段；如 ops 页面挂 system 菜单 → `system` |
+| `model_scope` | `domain`（缺省）/ `admin` | 域模型 `plugin/<p>/app/model` vs 后台专用 `app/admin/model/<p>` |
+| `ddl` | `migration-first`（插件形态缺省）/ `engine` | 迁移先行：表由迁移建好再出码（迁移 = DDL 唯一真源） |
+| `menu_migration` | `true`（插件形态缺省）| 菜单走**迁移种子**（幂等、可重放、过宿主图标门禁）而非即时写库 |
+| `menu` | `{enabled,parent,parent_title,icon,weigh,title}` | 菜单图标/父级/标题/权重；`enabled=false` = 不写菜单 |
+| `header` | `true`（插件形态缺省）| 生成 PHP 文件注入团队文件头（File/Author/Copyright） |
+| `route_file` / `backend_lang` | 缺省 `plugin/<p>/config/route.php` / `true` | 路由块目标文件；是否生成后端 PHP 语言包 |
+
+流程：净化/校验 → 冲突预检 → 渲染 PG 幂等迁移 → **[migration-first] `migrate:run` 建表** →
+调 radmin `CrudService`（v5.1.0+，与后台 /admin/crud 同一引擎）生成 控制器/模型/验证器 + 前端
+`index.vue/popupForm.vue` + 前端语言包 ts；插件形态另出 **路由块**（`plugin/<p>/config/route.php`，标记块幂等替换、
+控制器段大小写双变体）、**菜单种子迁移**（`Menu::create` ignore 模式）、**后端 PHP 语言包**（`api::loadControllerLang` 口径）
+→ 补跑 `migrate:run` 应用菜单种子 → 宿主门禁（`bin/lint.php` / `check-menu-icons.mjs` / web typecheck）。
+
+- 依赖：宿主需 radmin **v5.10.0+**（target 落位目标；纯 app/ 落位 v5.1.0+ 即可）；表结构真源 = 迁移文件
+- 冲突保护：目标文件已存在默认中止（`--force` 覆盖）；**幂等 merge 的路由文件不算冲突**（可往已有插件追加模块）
+- 选项：`--check`、`--dry-run`、`--no-migration`、`--force`、`--menu=migration|now|skip`、`--no-gates`、`--audit`、`--json`
+- 退出码：`0` 成功（含门禁全绿）｜`1` 失败｜`2` 待人工裁决（冲突清单/门禁红/预检不合格）
+
 
 ## MCP crud_generate 工具（自动注册）
 

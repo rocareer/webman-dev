@@ -1,3 +1,33 @@
+## [v3.25.0] - 2026-09-21
+
+### feat(crud): 设计 JSON v3 落位目标（target profile）——模块可落 plugin/<名>/app/，管线补迁移先行/门禁/新产物回执
+
+配合 radmin v5.10.x 的 target profile（`app\admin\library\crud\Target`），把「生成到宿主 app/」扩展为
+「按目标落位」并把生成闭环补全（Rolling 端到端实测通过：生成 → 建表 → 菜单种子 → 三门禁全绿 → HTTP 垂直打通）。
+
+- **设计 JSON v3**：顶层新增 `target` 块（`profile` / `plugin` / `controller_dir` / `model_scope` / `header` /
+  `ddl` / `menu_migration` / `menu{enabled,parent,parent_title,icon,weigh,title}` / `route_file` / `backend_lang`）。
+  `sanitize()` 白名单净化（未知键丢弃并告警）；`validate()` 委托 radmin Target 的严格规则（单一实现），
+  宿主 radmin < v5.10.0 时给结构化升级提示。**无 target 时行为与 v2 逐字节一致**（`test:crud-designer` 的 v1 黄金哈希未变）。
+- **落位与产物**：插件形态落 `plugin/<p>/app/{admin/controller/<dir>,model,validate,admin/lang/zh-cn}`，
+  多段表名折叠「域/末段」（`evaluation_run_funnel` → `evaluation/Funnel.php` + `EvaluationRunFunnel` 模型 + `evaluation/funnel` 页面）；
+  `targetFiles()` 目标感知（含路由文件与后端语言包），冲突预检覆盖新产物，**幂等 merge 的路由文件不计冲突**（否则「往已有插件加模块」主场景必失败）。
+- **管线**：`target.ddl=migration-first`（插件形态缺省）时先写迁移并 `migrate:run` 建表再出码（迁移是 DDL 唯一真源）；
+  出码后若写了菜单种子迁移则再补跑一次 `migrate:run` 应用它——生成结束即「菜单可用」，不留 pending 迁移等人记得跑。
+- **CLI**：`rocareer:make-crud` 新增 `--check`（只预检：落位/冲突/**图标实存性**/引擎可用性/表结构现状，不落盘）、
+  `--menu=migration|now|skip`、`--no-gates`；`--demo` 同时打印 v3 与 v1 示例；回执新增
+  `target/ddl/route_file/menu_migration(_reused)/backend_langs/written_files/checks/gates/migrate_menu`；
+  **退出码** 0 成功（含门禁全绿）｜1 失败｜2 待人工裁决（冲突清单/门禁红/预检不合格）。
+- **门禁串联**（宿主存在即跑，缺则如实跳过）：`bin/lint.php`（或逐个 `php -l`）→ `scripts/check-menu-icons.mjs`
+  → `npm --prefix web run typecheck`；`--audit` 的审计未过同样计入退出码 2。
+- **图标预检**直击历史事故（助手菜单写 FA5 `fa-robot`、宿主打包 FA4 → 侧栏空框）：`fa fa-X` 查宿主
+  `font-awesome.css` 的 `.fa-X:before`；`el-icon-X` 查 `@element-plus/icons-vue`；`local-X` 查 `web/src/assets/icons/X.svg`。
+- **fix(web)**：审计三页在严格 tsconfig（宿主 vue-tsc 门禁）下的类型错误——`Promise.all` + 解构需显式传
+  `createAxios<anyObj>(...)`（否则退化为 unknown）、`baTable.onTableHeaderAction` 需第二参（`{event, ids}`）。
+  此前包内 web 树未过宿主级 typecheck，Rolling 移植时被门禁抓出。
+- **测试**：`test:crud-designer` 新增 `[2v3]` 段（折叠/落位/回执/非法值/未知键共 18 项断言），全套 61 项断言通过；
+  radmin 侧配套 `CrudTargetTest`（14 用例，含「生成文件能否被执行」的结构断言）。
+
 ## [v3.24.0] - 2026-09-17
 
 ### feat(audit): 新增 vue_theme_hardcode 规则——Vue 样式段 EP 调色板硬编码门禁（print-erp 前端全域样式审计实证）

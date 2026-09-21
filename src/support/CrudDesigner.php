@@ -208,9 +208,28 @@ class CrudDesigner
             'defaultSortType' => $defaultSortType,
             'isCommonModel' => $isCommonModel,
         ];
+        // v3 落位目标（target profile）透传引擎：后端落 plugin/<名>/app/... 等由 radmin Target 解析，
+        // 需 radmin v5.10.0+（缺 class 即明确报错，不静默降级回 app/ 落位）
+        $target = is_array($design['target'] ?? null) ? $design['target'] : [];
+        if ($target) {
+            if (!class_exists(\app\admin\library\crud\Target::class)) {
+                throw new InvalidArgumentException('宿主 rocareer/radmin 版本过低：设计 JSON target 落位目标需 v5.10.0+（缺 app\admin\library\crud\Target），请 composer update rocareer/radmin');
+            }
+            $tablePayload['target'] = $target;
+        }
+
         // 菜单名 = 引擎 getMenuName：表名下划线即页面/菜单目录层级（cc_student -> cc/student，
-        // 代码落 app/admin/controller/cc/Student.php + web/src/views/backend/cc/student/）
+        // 代码落 app/admin/controller/cc/Student.php + web/src/views/backend/cc/student/）；
+        // 插件形态折叠为「域/末段」、目录段取 target.controller_dir（缺省 = 插件名）。
         $menuName = str_replace('_', '/', $name);
+        if ($target) {
+            $resolved = \app\admin\library\crud\Target::fromArray($target);
+            if ($resolved && $resolved->isPlugin()) {
+                [, $last] = $resolved->collapse($name);
+                $dir      = $resolved->controllerDir('');
+                $menuName = ($dir !== '' ? $dir . '/' : '') . $last;
+            }
+        }
 
         // ---- 4. 迁移文件渲染（PG 幂等；表结构先迁移建好，引擎只出代码） ----
         $ts = $this->nextTs($name);
@@ -225,7 +244,8 @@ class CrudDesigner
             'table_name' => $name,
             'module' => '',
             'warnings' => $warnings,
-        ];
+        ] + ($target ? ['target' => $target] : []);
+        // 注：「+ ($target ? … : [])」保证无 target 时返回结构与 v1/v2 逐字节一致（黄金哈希守护）
     }
 
     /**
@@ -767,13 +787,51 @@ class CrudDesigner
      *
      * 控制器/模型/验证器/前端 views/lang 与引擎 parseNameData 推导一致，
      * CLI/MCP 冲突预检与摘要共用，防重复生成覆盖已改代码。
+     *
+     * v3：传 $target（落位目标）时按插件形态推导（折叠「域/末段」、落 plugin/<p>/app/…、
+     * 附带路由文件与后端语言包）——与 radmin Target 的落位规则同源。
+     *
+     * @param string     $tableName 表名（不含前缀）
+     * @param array|null $target    v3 target 块（空 = 历史 app/ 形态）
      */
-    public static function targetFiles(string $tableName): array
+    public static function targetFiles(string $tableName, ?array $target = null): array
     {
         $path = str_replace('_', '/', $tableName);  // cc_student -> cc/student
         $parts = explode('/', $path);
         $uc = self::camel((string) array_pop($parts));
         $dir = implode('/', $parts);
+
+        if ($target && !empty($target['profile']) && class_exists(\app\admin\library\crud\Target::class)) {
+            $resolved = \app\admin\library\crud\Target::fromArray($target);
+            if ($resolved && $resolved->isPlugin()) {
+                [, $last] = $resolved->collapse($tableName);
+                $dir      = $resolved->controllerDir('');
+                $camelAll = self::camel($tableName);
+                $camel    = self::camel($last);
+                $plugin   = $resolved->plugin();
+                $files    = [
+                    'plugin/' . $plugin . '/app/admin/controller/' . ($dir !== '' ? $dir . '/' : '') . $camel . '.php',
+                    $resolved->modelScope() === 'domain'
+                        ? 'plugin/' . $plugin . '/app/model/' . $camelAll . '.php'
+                        : 'plugin/' . $plugin . '/app/admin/model/' . ($dir !== '' ? $dir . '/' : '') . $camel . '.php',
+                    $resolved->modelScope() === 'domain'
+                        ? 'plugin/' . $plugin . '/app/validate/' . $camelAll . '.php'
+                        : 'plugin/' . $plugin . '/app/admin/validate/' . ($dir !== '' ? $dir . '/' : '') . $camel . '.php',
+                    'web/src/views/backend/' . ($dir !== '' ? $dir . '/' : '') . $last . '/index.vue',
+                    'web/src/views/backend/' . ($dir !== '' ? $dir . '/' : '') . $last . '/popupForm.vue',
+                    'web/src/lang/backend/zh-cn/' . ($dir !== '' ? $dir . '/' : '') . $last . '.ts',
+                    'web/src/lang/backend/en/' . ($dir !== '' ? $dir . '/' : '') . $last . '.ts',
+                ];
+                if ($resolved->routeFile() !== '') {
+                    $files[] = $resolved->routeFile();
+                }
+                if ($resolved->backendLang()) {
+                    $files[] = 'plugin/' . $plugin . '/app/admin/lang/zh-cn/' . ($dir !== '' ? $dir . '/' : '') . $last . '.php';
+                }
+                return $files;
+            }
+        }
+
         $prefix = $dir !== '' ? $dir . '/' : '';
         return [
             "app/admin/controller/{$prefix}{$uc}.php",

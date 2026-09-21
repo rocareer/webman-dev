@@ -180,9 +180,10 @@ const loadRuns = async () => {
 
 const loadOptions = async () => {
     try {
+        // 显式给 createAxios 传 Data 泛型：Promise.all + 解构下 TS 无法推断返回值，会退化为 unknown
         const [pRes, rRes] = await Promise.all([
-            createAxios({ url: '/admin/audit.AuditProject/index', method: 'get', params: { limit: 100 } }),
-            createAxios({ url: '/admin/audit.AuditRule/index', method: 'get', params: { limit: 100 } }),
+            createAxios<anyObj>({ url: '/admin/audit.AuditProject/index', method: 'get', params: { limit: 100 } }),
+            createAxios<anyObj>({ url: '/admin/audit.AuditRule/index', method: 'get', params: { limit: 100 } }),
         ])
         projectOptions.value = pRes.data?.list || []
         ruleOptions.value = rRes.data?.list || []
