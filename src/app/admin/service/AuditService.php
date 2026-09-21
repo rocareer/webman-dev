@@ -78,7 +78,7 @@ class AuditService
     /**
      * 业务端审计适配（config/audit.php 协议，v3.27.0 起）——分工口径：**基础设施出引擎，业务端出规则**。
      *
-     * 两级声明，键相对**声明文件所在目录**：
+     * 两级声明，glob 键相对**该配置所约束的目录**（工作区级 = root；包级 = 包目录——不是 config/ 目录本身）：
      *   - 工作区级 `<root>/config/audit.php`：布局知识与全域适配（rolling = 工作区根；family = 包目录根，通常无）
      *   - 包级 `<dir>/config/audit.php`（rolling = plugin/<名>/config/audit.php）：包自有适配，只作用于本包
      * 协议键（全部可选）：
@@ -126,9 +126,9 @@ class AuditService
     }
 
     /**
-     * 解析声明文件里的 glob（相对声明文件所在目录；绝对路径原样）为具体文件清单
+     * 解析声明文件里的 glob（相对 base；绝对路径原样）为具体文件清单
      *
-     * @param string $base     声明文件所在目录
+     * @param string $base     glob 的基准目录（该配置所约束的目录）
      * @param array  $patterns glob 列表（相对 base）
      * @return list<string> 命中的文件绝对路径
      */
@@ -2449,8 +2449,8 @@ class AuditService
      * 前缀通配（happ.message.* 等）单独收集用于动态事件匹配。
      *
      * v3.27.0 业务端适配：内建 glob 是**家族布局约定**；业务工作区自己的监听登记布局
-     * 由 config/audit.php 的 event_registry_globs 声明（相对声明文件所在目录）——
-     * 工作区级 + 各包级（rolling = plugin/<名>/config/audit.php；family = <包>/config/audit.php）均并入。
+     * 由 config/audit.php 的 event_registry_globs 声明（相对该配置所约束的目录：工作区级 = root，
+     * 包级 = 包目录）——工作区级 + 各包级（rolling = plugin/<名>/config/audit.php；family = <包>/config/audit.php）均并入。
      *
      * @return array ['events' => 静态事件名集合, 'prefixes' => 通配前缀集合]
      */
@@ -2473,7 +2473,9 @@ class AuditService
             }
         };
         $scanDir($root);
-        // 业务端声明的监听登记源（config/audit.php 的 event_registry_globs）
+        // 业务端声明的监听登记源（config/audit.php 的 event_registry_globs）。
+        // glob 相对**该配置所约束的目录**解析（工作区级 = root；包级 = 包目录）——
+        // 配置文件物理上在 config/ 子目录里，dirname() 少算一层会让全部 glob 落空（v3.27.1 实测）。
         $auditConfigs = [$root . '/config/audit.php'];
         $pkgPattern = ($this->layout === 'rolling' ? "$root/plugin/*" : "$root/*") . '/config/audit.php';
         foreach (glob($pkgPattern) ?: [] as $f) {
@@ -2485,7 +2487,8 @@ class AuditService
             }
             $cfg = include $cf;
             if (is_array($cfg) && ($cfg['event_registry_globs'] ?? []) !== []) {
-                foreach ($this->globFilesUnder(dirname($cf), (array) $cfg['event_registry_globs']) as $f) {
+                $base = preg_replace('~[\\\\/]config$~', '', dirname($cf)) ?: dirname($cf);
+                foreach ($this->globFilesUnder($base, (array) $cfg['event_registry_globs']) as $f) {
                     $this->collectEventNames($f, $events, $prefixes);
                 }
             }
