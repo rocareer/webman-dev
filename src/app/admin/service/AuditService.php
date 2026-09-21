@@ -1239,6 +1239,12 @@ class AuditService
             return ['issues' => [], 'note' => 'SDK 公共 API 包（无 src/app/admin）跳过'];
         }
         foreach ($this->rootClassRefs($root)['defs'] as $def) {
+            // rolling 布局：框架自动发现类不算死代码——命令（`app/command/`、`command/`）由 webman console
+            // 扫描注册、无显式引用；任务处理器（`app/task/`）由 rocareer/crontab 按 DB 任务表实例化
+            if ($this->layout === 'rolling'
+                && preg_match('~^(.*/)?(app/)?(command|task)/~', (string) ($def['rel'] ?? ''))) {
+                continue;
+            }
             if ($def['pkg'] !== strtolower($pkg) && $def['pkg'] !== strtolower(basename($dir))) {
                 continue;
             }

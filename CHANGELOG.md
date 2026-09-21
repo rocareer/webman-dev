@@ -1,3 +1,11 @@
+## [v3.26.3] - 2026-09-21
+
+### fix(audit): rolling 布局下命令/任务类不算死代码（框架自动发现/按 DB 任务表实例化）
+
+`--root=<Rolling>` 实测：`dead classes` 把 `app/command/DevMakeCrud.php` 等**框架自动发现**的命令类
+报成死代码（webman console 扫描注册、无显式引用；`app/task/*` 亦由 `rocareer/crontab` 按 DB 任务表实例化）——
+rolling 布局下跳过 `(app/)?(command|task)/` 路径下的类定义（仅 rolling 生效，family 行为与历史一致）。
+
 ## [v3.26.2] - 2026-09-21
 
 ### fix(audit): `common_utils` 规则加 composer.json 缺失守卫——Rolling 插件单元（无 composer.json）不再崩审计
