@@ -1,3 +1,19 @@
+## [v3.25.1] - 2026-09-21
+
+### fix(crud-design): AI 草稿提示词升 v3——落位 target 块从「被模型丢掉」到「需求有就必须原样体现」
+
+Rolling 端到端实测 AI 草稿链路（dev:crud-design-request → 队列消费者 → LLM → 草稿台账）时发现：
+`systemPrompt()` 仍写「设计态契约 v2」，只描述 table/fields，**未提 target 块**——即使请求里明确给了 target，
+模型也整块丢掉，草稿 confirm 后落回宿主 `app/` 默认落位（v3 落位能力在 AI 链路上等于不可用）。
+
+- 提示词升 v3：`version` 示例改 3；新增第 8 条 target 落位块契约（profile/plugin/controller_dir/model_scope/menu），
+  并写明「需求里出现插件/落位/菜单目录或父级/图标时必须原样体现；没提就整块省略」「icon 用请求给的名字（FA4 校验）、
+  parent/parent_title 不许编造」。
+- 实测（Rolling，agent=memory-coder / deepseek-flash）：修复前草稿无 target（模型视其为多余键）；
+  修复后草稿按请求产出 `target.profile=rolling-plugin + plugin/controller_dir/menu`，confirm 落位正确。
+- 边界：本版只修提示词，未给 `rocareer:crud-design confirm` 加「人工补 target」的选项——草稿没带 target 时
+  仍走宿主默认落位（人工可在 confirm 前用 `show` 看设计、必要时改草稿）。
+
 ## [v3.25.0] - 2026-09-21
 
 ### feat(crud): 设计 JSON v3 落位目标（target profile）——模块可落 plugin/<名>/app/，管线补迁移先行/门禁/新产物回执

@@ -261,15 +261,21 @@ class CrudDesignAgentService
     protected function systemPrompt(): string
     {
         $types = implode('/', array_keys(\Rocareer\WebmanDev\support\CrudDesigner::DESIGN_TYPES));
-        return "你是 radmin 后台模块设计助手。根据用户需求产出「设计态契约 v2」的 JSON。\n"
+        return "你是 radmin 后台模块设计助手。根据用户需求产出「设计态契约 v3」的 JSON。\n"
             . "硬性要求：\n"
             . "1. 只输出一个 JSON 对象，禁止代码围栏、注释或任何解释文字。\n"
-            . "2. 结构：{\"version\":2,\"table\":{\"name\":\"小写蛇形表名\",\"comment\":\"中文表名\",\"quick_search\":[...],\"form_layout\":[{\"group\":\"分组名\",\"fields\":[...]}]},\"fields\":[{\"name\":\"小写蛇形\",\"comment\":\"中文列名\",\"design_type\":\"控件类型\",...}]}。\n"
+            . "2. 结构：{\"version\":3,\"table\":{\"name\":\"小写蛇形表名\",\"comment\":\"中文表名\",\"quick_search\":[...],\"form_layout\":[{\"group\":\"分组名\",\"fields\":[...]}]},\"fields\":[{\"name\":\"小写蛇形\",\"comment\":\"中文列名\",\"design_type\":\"控件类型\",...}]}。\n"
             . "3. design_type 只能取：{$types}。\n"
             . "4. 关联字段用 remote_select/remote_selects，并给 remote:{table,pk,field,relation_fields}；不确定就用 input，不要编造。\n"
             . "5. 枚举字段（select/radio/checkbox/selects）必须给 options:[{label,value}]，不要编造选项。\n"
             . "6. 不要声明 id/create_time/update_time（系统自动注入）；主键固定 id。\n"
-            . "7. 字段若列入 form_layout 必须先声明；不确定就不给 form_layout。";
+            . "7. 字段若列入 form_layout 必须先声明；不确定就不给 form_layout。\n"
+            . "8. 顶层可选 target 落位块（需求里出现「插件/落位/菜单目录或父级/图标」等落位信息时**必须**原样体现；"
+            . "需求没提就整块省略——省略=落宿主 app/ 的默认形态）："
+            . "{\"profile\":\"rolling-plugin\",\"plugin\":\"插件名(小写蛇形)\",\"controller_dir\":\"控制器目录段(缺省=插件名)\","
+            . "\"model_scope\":\"domain\",\"menu\":{\"icon\":\"fa fa-xxx\",\"parent\":\"父级菜单 name（如 system）\",\"parent_title\":\"目录中文标题\",\"title\":\"菜单标题\"}}。"
+            . "profile=rolling-plugin 表示模块落该插件（后端 plugin/<plugin>/app/**、路由/菜单种子/语言包一并生成）；"
+            . "icon 必须是请求里给的名字（宿主按 Font Awesome 4.7 校验，不确定就用 fa fa-circle-o）；parent/parent_title 不许编造，请求没给就不写这两个键。";
     }
 
     protected function userPrompt(string $prompt, string $tableName): string
