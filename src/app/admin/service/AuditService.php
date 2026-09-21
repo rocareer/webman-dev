@@ -2390,6 +2390,10 @@ class AuditService
         }
         // 适用域：仅约束依赖 rocareer/radmin 的包——纯 PHP SDK（ai-client/http 等，零 radmin 依赖）
         // 不可能调用 radmin 全局函数，机械套用即误报（global-helper-contract-versioning 模式）
+        // 无 composer.json 的单元（rolling 插件目录等）无法判定依赖 → 跳过而非崩/误报
+        if (!is_file("$dir/composer.json")) {
+            return null;
+        }
         $composer = json_decode((string) file_get_contents("$dir/composer.json"), true);
         if (!isset($composer['require']['rocareer/radmin'])) {
             return null;

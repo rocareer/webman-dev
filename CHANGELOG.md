@@ -1,3 +1,12 @@
+## [v3.26.2] - 2026-09-21
+
+### fix(audit): `common_utils` 规则加 composer.json 缺失守卫——Rolling 插件单元（无 composer.json）不再崩审计
+
+v3.26.1 实测 `--root=<Rolling>` 时崩在 `common_utils`：规则无守卫地读 `<单元>/composer.json`
+（`file_get_contents(...): Failed to open stream`）——rolling 的插件单元没有 composer.json，
+审计整个中断。修法：缺文件即 `return null`（无法判定 radmin 依赖 → 跳过而非误报/崩溃），
+与 `checkVersion` 的 `!$hosts` 守卫同款语义。已复核同文件内无其它对 `$dir/*` 的无守卫读取。
+
 ## [v3.26.1] - 2026-09-21
 
 ### fix(audit): Rolling 布局补「单元列表」——`app` + 各 `plugin/<名>`（v3.26.0 适配器的收口件）
