@@ -21,7 +21,7 @@ class AuditService
     public const RULES = [
         'php_syntax' => ['title' => 'PHP 语法检查', 'description' => 'php -l 全量语法校验（批量子进程，单次调用）'],
         'controller' => ['title' => '控制器规范', 'description' => '继承 Backend、: Response 签名、initialize 调 parent::initialize()、public 方法返回类型'],
-        'permission' => ['title' => '权限节点匹配', 'description' => '控制器方法 routePath 与迁移注册的按钮名比对：缺失/错名/孤儿按钮全部报出'],
+        'permission' => ['title' => '权限节点匹配', 'description' => '控制器方法 routePath 与迁移注册的按钮名比对：缺失/错名/孤儿按钮全部报出；迁移之外的按钮名字面量清单（种子/常量）可在业务端 config/audit.php 的 button_name_globs 声明为额外扫描源'],
         'migration' => ['title' => '迁移命名与查重（精确到秒）', 'description' => '全工作区 migrations/pg-migrations 迁移文件形态门禁（与 webman-migration v2.4.0 运行时强检同口径）：版本号撞号（撞号会阻断全家桶 migrate:run）、数字前缀非 14 位时间戳（8 位「年月日就完了」风会被 Phinx 照常加载且前缀即版本号，撞号高危）、14 位裸版本号缺名字段、不匹配 Phinx 正则的静默忽略文件（永不执行，造成已迁移假象）全部报错；「年月日+000000」存量只计数进 note 不报错（新建禁止）。新建迁移一律 php webman migrate:create 生成（真实时间戳精确到秒 + 全局查重自动顺延）'],
         'residue' => ['title' => '残留扫描', 'description' => 'CRUD 脚手架死代码（Test 控制器/模型/验证器）+ TODO/FIXME 计数'],
         'version' => ['title' => '版本同步', 'description' => 'CHANGELOG 头部版本 vs dev/full composer.json path 钉版'],
@@ -35,7 +35,7 @@ class AuditService
         'dto_contract' => ['title' => 'DTO 分层规范', 'description' => 'DTO 分层门禁：公开 API 控制器（非 admin）手拼多字段数组输出 = 契约未固化，应引入 app/<模块>/dto/ typed DTO 或 Model accessor；dto/ 目录内纯搬运类（toArray 原样返回入参、无整形/强转/脱敏）= 过度设计，直接用数组；目录命名用 dto 不用 data（data 与"数据/数据库"歧义）；文件标注 @audit-ignore dto_contract 显式豁免'],
         'llm_gate' => ['title' => '全域 LLM 门禁（智能体出口）', 'description' => '全域 LLM 业务必须经 agent 包 AgentGateway（无智能体不开工）：业务代码禁止直接实例化 AiRouterService 调用 LLM/向量化；ai（底层提供者）与 agent（网关）豁免；文件标注 @audit-ignore llm_gate 显式豁免（如 ai 调试/开放 API 运维接口）'],
         'orm_migrated' => ['title' => 'think 生态残留门禁（think-orm + think-validate 等清零）', 'description' => 'think 生态残留门禁：src 内禁止任何 think 类引用（think\facade\Db / think\db\exception / think\model\relation / think\Validate / think\Facade / think\exception\ValidateException / think\Paginator / think\File / think\Exception）与 config(\'think-orm...\') 调用、composer 依赖 webman/think-orm 或 topthink/*（v5.0.0 起验证框架已切 webman/validation，think-validate/think-container 白名单随 radmin v5.0.0 移除）；文件标注 @audit-ignore orm_migrated 显式豁免'],
-        'event_standard' => ['title' => '事件规范（webman/event）', 'description' => 'webman/event 使用规范门禁（见 docs/webman-event-standard.md）：事件发射一律用 Event::dispatch（不吞异常，监听器异常上抛），禁止 Event::emit（吞异常掩盖监听器故障）；事件名必须 <提供方>.<领域>.<动作> 全小写点分（禁驼峰/连字符/下划线分隔/无前缀裸名）；业务代码禁止散落 Event::on()（监听器集中 config/plugin/*/event.php 或 config/event.php 声明，唯一例外 radmin EventRegister 内置 member.*）；静态事件名应在本包/跨包/宿主有对应监听器（孤儿事件=发射即空转，纯日志应直写日志）；app/listener 监听器方法签名 (array $data): void + 自身 try/catch；文件标注 @audit-ignore event_standard 显式豁免'],
+        'event_standard' => ['title' => '事件规范（webman/event）', 'description' => 'webman/event 使用规范门禁（见 docs/webman-event-standard.md）：事件发射一律用 Event::dispatch（不吞异常，监听器异常上抛），禁止 Event::emit（吞异常掩盖监听器故障）；事件名必须 <提供方>.<领域>.<动作> 全小写点分（禁驼峰/连字符/下划线分隔/无前缀裸名）；业务代码禁止散落 Event::on()（监听器集中 config/plugin/*/event.php 或 config/event.php 声明，唯一例外 radmin EventRegister 内置 member.*）；静态事件名应在本包/跨包/宿主有对应监听器（孤儿事件=发射即空转，纯日志应直写日志）；**监听登记文件的布局由业务端在 config/audit.php 的 event_registry_globs 声明**（内建 glob 只认家族布局约定；rolling 等自有布局的登记源不声明即误报孤儿）；app/listener 监听器方法签名 (array $data): void + 自身 try/catch；文件标注 @audit-ignore event_standard 显式豁免'],
         'common_utils' => ['title' => '通用工具真源门禁（禁止重复造轮子）', 'description' => '通用工具真源门禁（见 docs/common-utils-registry.md）：已知手写重复模式必须用 radmin 全局函数——max(1, min(100 → clamp_limit、分页 max(1, (int) → clamp_page、keyword/quickSearch 兼容链 → request_keyword、where 闭包多字段 like → keyword_like、json_encode(UNICODE|SLASHES) → json_unicode、strtr(base64_encode → base64url_encode、md5(uniqid → uuid7、固定四星掩码 → mask_secret；真源定义文件（radmin functions.php）与审计引擎自身源文件豁免；文件标注 @audit-ignore common_utils 显式豁免'],
         'comsearch_contract' => ['title' => '高级检索契约门禁（comSearch 基础能力）', 'description' => '高级检索/排序是 radmin 基础能力（Backend::applyListQueryContract 一行接入）：admin 控制器禁止手写解析 comSearch 的 search 数组（->input(\'search\')）——各处自研解析是静默腐烂高发区（print-erp 16 控制器全灭、crontab Log val/value 键错位对标准 comSearch 无效且 int/enum 列收非法串 500、slides Deck $limit 未定义变量分页大小恒默认等实证）；文件标注 @audit-ignore comsearch_contract 豁免（跨表字段别名等正当映射场景，须注释理由）'],
         'install_standard' => ['title' => 'Install.php 标准化', 'description' => 'Install.php 标准化门禁（见 docs/install-standard.md）：WEBMAN_PLUGIN 常量、install/update/uninstall 三钩子齐全、install 签名兼容官方 Install::install(true)（禁强类型参数）、禁官方骨架残留 copy_dir/remove_dir（显式 overwrite=true 的 copy_dir 除外）与 array() 语法、类前中文头注释；文件标注 @audit-ignore install_standard 显式豁免'],
@@ -74,6 +74,154 @@ class AuditService
 
     /** 包内类名 -> 文件路径索引（extends 链解析用；按包目录缓存） */
     protected array $classFileIndex = [];
+
+    /**
+     * 业务端审计适配（config/audit.php 协议，v3.27.0 起）——分工口径：**基础设施出引擎，业务端出规则**。
+     *
+     * 两级声明，键相对**声明文件所在目录**：
+     *   - 工作区级 `<root>/config/audit.php`：布局知识与全域适配（rolling = 工作区根；family = 包目录根，通常无）
+     *   - 包级 `<dir>/config/audit.php`（rolling = plugin/<名>/config/audit.php）：包自有适配，只作用于本包
+     * 协议键（全部可选）：
+     *   event_registry_globs => string[] 事件监听登记文件 glob（event 规则「谁消费谁登记」的扫描源——
+     *                          登记文件不必叫 event.php，业务端自己的布局自己声明）
+     *   button_name_globs    => string[] 权限节点字面量的额外扫描源（迁移之外集中维护按钮名清单时用）
+     *   rules                => class-string[] 业务自定义规则，实现 AuditRuleContract（workspace 级按
+     *                          packages() 圈定适用单元；包级只作用于本包）
+     *   skip                 => 豁免：workspace 级 [单元 => [规则码 => 理由]]；包级 [规则码 => 理由]
+     *                          （豁免不是失败，但必须写理由、审计报告留痕）
+     * 合并语义：globs/rules 取并集；skip 包级优先于工作区级同名键。
+     */
+
+    /** 审计规则契约（业务端自定义规则的判定口径） */
+    public const AUDIT_RULE_CONTRACT = AuditRuleContract::class;
+
+    /** 工作区级声明 */
+    public function workspaceAuditConfig(string $root): array
+    {
+        $key = $root . ':audit-config:ws';
+        if (!isset(self::$rootScanCache[$key])) {
+            self::$rootScanCache[$key] = $this->loadAuditConfigFile($root);
+        }
+        return self::$rootScanCache[$key];
+    }
+
+    /** 包级声明 */
+    public function packageAuditConfig(string $dir): array
+    {
+        $key = rtrim($dir, '/') . ':audit-config:pkg';
+        if (!isset(self::$rootScanCache[$key])) {
+            self::$rootScanCache[$key] = $this->loadAuditConfigFile(rtrim($dir, '/'));
+        }
+        return self::$rootScanCache[$key];
+    }
+
+    protected function loadAuditConfigFile(string $base): array
+    {
+        $file = rtrim($base, '/') . '/config/audit.php';
+        if (!is_file($file)) {
+            return [];
+        }
+        $cfg = include $file;
+        return is_array($cfg) ? $cfg : [];
+    }
+
+    /**
+     * 解析声明文件里的 glob（相对声明文件所在目录；绝对路径原样）为具体文件清单
+     *
+     * @param string $base     声明文件所在目录
+     * @param array  $patterns glob 列表（相对 base）
+     * @return list<string> 命中的文件绝对路径
+     */
+    protected function globFilesUnder(string $base, array $patterns): array
+    {
+        $out = [];
+        foreach ($patterns as $g) {
+            $g = (string) $g;
+            if ($g === '') {
+                continue;
+            }
+            $abs = str_starts_with($g, '/') ? $g : rtrim($base, '/') . '/' . ltrim($g, '/');
+            foreach (glob($abs) ?: [] as $f) {
+                if (is_file($f)) {
+                    $out[] = $f;
+                }
+            }
+        }
+        return $out;
+    }
+
+    /** 本包生效的自定义规则实例（workspace 级按 packages() 圈定 + 包级全收；非法声明折成一条 FAIL） */
+    protected function customRules(string $root, string $dir, string $pkg): array
+    {
+        $ws = $this->workspaceAuditConfig($root);
+        $pkgCfg = $this->packageAuditConfig($dir);
+        $classes = array_values(array_unique(array_merge(
+            (array) ($ws['rules'] ?? []),
+            (array) ($pkgCfg['rules'] ?? [])
+        )));
+        $valid = [];
+        $invalid = [];
+        foreach ($classes as $cls) {
+            if (is_string($cls) && $cls !== '' && class_exists($cls) && is_a($cls, self::AUDIT_RULE_CONTRACT, true)) {
+                $valid[] = new $cls();
+                continue;
+            }
+            $invalid[] = (string) (is_object($cls) ? get_class($cls) : $cls);
+        }
+        $out = [];
+        if ($invalid !== []) {
+            $out[] = new class($invalid) implements AuditRuleContract {
+                public function __construct(protected array $bad)
+                {
+                }
+
+                public function code(): string
+                {
+                    return 'audit_config';
+                }
+
+                public function title(): string
+                {
+                    return '审计适配配置（config/audit.php）';
+                }
+
+                public function packages(): array
+                {
+                    return ['*'];
+                }
+
+                public function check(string $root, string $pkg, string $dir): ?array
+                {
+                    return [
+                        'issues' => array_map(
+                            static fn (string $c): string => "自定义规则 `{$c}` 不存在或未实现 " . AuditService::AUDIT_RULE_CONTRACT,
+                            $this->bad
+                        ),
+                        'note' => 'rules 登记项必须实现 AuditRuleContract',
+                    ];
+                }
+            };
+        }
+        foreach ($valid as $rule) {
+            if (in_array('*', $rule->packages(), true) || in_array($pkg, $rule->packages(), true)) {
+                $out[] = $rule;
+            }
+        }
+        return $out;
+    }
+
+    /** 本包某规则的豁免理由（workspace [单元=>[码=>理由]] 与包级 [码=>理由]；null = 不豁免） */
+    protected function auditSkipReason(string $root, string $dir, string $pkg, string $code): ?string
+    {
+        $ws = (array) ($this->workspaceAuditConfig($root)['skip'] ?? []);
+        $reason = (array) ($ws[$pkg] ?? [])[$code] ?? null;
+        if (is_string($reason) && $reason !== '') {
+            return $reason;
+        }
+        $reason = (array) ($this->packageAuditConfig($dir)['skip'] ?? [])[$code] ?? null;
+        return is_string($reason) && $reason !== '' ? $reason : null;
+    }
+
 
     /** 默认审计包列表（与 rocareer:audit 命令一致；MCP quality_audit 工具缺省使用；覆盖全部 src/* 基础设施包） */
     public const DEFAULT_PACKAGES = [
@@ -293,7 +441,16 @@ class AuditService
                     continue;
                 }
                 $rule = self::RULES[$code];
+                // 业务端豁免（config/audit.php 的 skip，必须写理由）：跳过执行、按「留痕豁免」输出
+                if (($reason = $this->auditSkipReason($root, $dir, $name, $code)) !== null) {
+                    $rules[] = $this->wrap($code, $rule['title'], null, '业务端豁免: ' . $reason);
+                    continue;
+                }
                 $rules[] = $this->wrap($code, $rule['title'], $this->$method($root, $name, $dir), $skipMap[$code] ?? '');
+            }
+            // 业务端自定义规则（基础设施代跑：业务端负责规则本体，引擎负责执行/汇总/退出码）
+            foreach ($this->customRules($root, $dir, $name) as $custom) {
+                $rules[] = $this->wrap($custom->code(), $custom->title(), $custom->check($root, $name, $dir), '');
             }
             $packages[] = ['name' => $name, 'dir' => $dir, 'rules' => $rules];
         }
@@ -468,13 +625,26 @@ class AuditService
         // 迁移中注册的按钮名（x/y/z 三段；按钮名可含驼峰/连字符——webman 路由 kebab→驼峰方法等价，
         // 如按钮 memory/snapshot/session-detail 对应方法 sessionDetail，比对统一小写+去连字符）
         $buttons = [];
-        foreach ($this->phpFiles($migDir) as $mf) {
-            $msrc = file_get_contents($mf);
-            if (preg_match_all("~['\"]([a-zA-Z_]+/[a-zA-Z_]+/[a-zA-Z_-]+)['\"]~", $msrc, $m)) {
+        $collect = function (string $src) use (&$buttons): void {
+            if (preg_match_all("~['\"]([a-zA-Z_]+/[a-zA-Z_]+/[a-zA-Z_-]+)['\"]~", $src, $m)) {
                 foreach ($m[1] as $name) {
                     $buttons[str_replace('-', '', strtolower($name))] = true;
                 }
             }
+        };
+        foreach ($this->phpFiles($migDir) as $mf) {
+            $collect((string) file_get_contents($mf));
+        }
+        // v3.27.0 业务端适配：迁移之外的按钮名字面量来源（config/audit.php 的 button_name_globs，
+        // 工作区级相对工作区根、包级相对包目录）——业务端把节点名集中在种子/常量清单时在此声明
+        $wsCfg = $this->workspaceAuditConfig($root);
+        $pkgCfg = $this->packageAuditConfig($dir);
+        $extraSources = array_merge(
+            $this->globFilesUnder($root, (array) ($wsCfg['button_name_globs'] ?? [])),
+            $this->globFilesUnder($dir, (array) ($pkgCfg['button_name_globs'] ?? []))
+        );
+        foreach ($extraSources as $sf) {
+            $collect((string) file_get_contents($sf));
         }
         $issues = [];
         $methodCount = 0;
@@ -2274,6 +2444,10 @@ class AuditService
      * EventRegister Event::on 事件名。
      * 前缀通配（happ.message.* 等）单独收集用于动态事件匹配。
      *
+     * v3.27.0 业务端适配：内建 glob 是**家族布局约定**；业务工作区自己的监听登记布局
+     * 由 config/audit.php 的 event_registry_globs 声明（相对声明文件所在目录）——
+     * 工作区级 + 各包级（rolling = plugin/<名>/config/audit.php；family = <包>/config/audit.php）均并入。
+     *
      * @return array ['events' => 静态事件名集合, 'prefixes' => 通配前缀集合]
      */
     protected function workspaceEventRegistry(string $root): array
@@ -2295,6 +2469,23 @@ class AuditService
             }
         };
         $scanDir($root);
+        // 业务端声明的监听登记源（config/audit.php 的 event_registry_globs）
+        $auditConfigs = [$root . '/config/audit.php'];
+        $pkgPattern = ($this->layout === 'rolling' ? "$root/plugin/*" : "$root/*") . '/config/audit.php';
+        foreach (glob($pkgPattern) ?: [] as $f) {
+            $auditConfigs[] = $f;
+        }
+        foreach ($auditConfigs as $cf) {
+            if (!is_file($cf)) {
+                continue;
+            }
+            $cfg = include $cf;
+            if (is_array($cfg) && ($cfg['event_registry_globs'] ?? []) !== []) {
+                foreach ($this->globFilesUnder(dirname($cf), (array) $cfg['event_registry_globs']) as $f) {
+                    $this->collectEventNames($f, $events, $prefixes);
+                }
+            }
+        }
         // dev 宿主（root 的上一级/dev）
         $devRoot = dirname(rtrim($root, '/')) . '/dev';
         if (is_dir($devRoot)) {

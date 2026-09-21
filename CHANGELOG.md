@@ -1,3 +1,20 @@
+## [v3.27.0] - 2026-09-21
+
+### feat(audit): 审计扩展协议——基础设施出引擎，业务端出规则（config/audit.php）
+
+- **分工口径落地**：`AuditService` 只做执行服务（扫描/汇总/退出码/CLI+MCP+后台三入口）；审计规则与布局
+  知识由**业务端**在工作区根 `config/audit.php`（全域）与包目录 `config/audit.php`（只作用于该包）声明。
+  协议键：`event_registry_globs`（事件监听登记文件 glob）/ `button_name_globs`（权限节点字面量额外扫描源）/
+  `rules`（自定义规则类，实现新契约 `app\admin\service\AuditRuleContract`）/ `skip`（逐单元逐规则豁免，
+  必须写理由，报告按「业务端豁免」留痕）。glob 相对**声明文件所在目录**解析；globs/rules 并集、skip 包级优先。
+- **动因（两条 Rolling 布局误报实证）**：① `event_standard` 的监听注册表 glob `$root/*/config/event.php`
+  匹配不到 rolling 布局的 `plugin/<名>/config/event.php`（实测两条 glob 零命中）→ 全仓插件事件被误判孤儿事件；
+  ② `permission` 规则只扫迁移——业务端把按钮名集中在种子/常量清单时无从声明。二者现均由业务端在
+  `config/audit.php` 自行声明，引擎照单代跑；未声明的 family 工作区行为与历史逐字节一致。
+- **`--list-rules` 规则描述同步**：permission / event_standard 两条补扩展协议说明（清单由引擎常量自动生成，
+  重跑 `--write-doc` 即同步）。
+- 本版同时携带上一提交 `1c07bc0`（监听器审计报错文案的全角括号插值修复，此前已推未发条目）。
+
 ## [3.26.4] - 2026-09-21
 
 ### fix(chore): 补登记三处软依赖（mcp / agent / happ-client）
