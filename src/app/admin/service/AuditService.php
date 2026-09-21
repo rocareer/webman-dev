@@ -61,6 +61,17 @@ class AuditService
     /** 本轮已归属过迁移冲突的时间戳（避免全量审计重复报错） */
     protected array $reportedMigrationStamps = [];
 
+    /**
+     * 源码布局（audit() 每轮按 root 判定；规则内 `src/` 前缀统一走 srcPath）：
+     *   family  —— 家族包布局（`<包>/src/app/**`，缺省；dev/full 宿主与各 rocareer 包）
+     *   rolling —— Rolling 工作区布局（`app/` 主应用 + `plugin/<名>/app/**` + 单库 `database/migrations`）
+     * 缺省 family，规则产物与历史逐字节一致。
+     */
+    protected string $layout = 'family';
+
+    /** rolling 布局的工作区根（`plugins/app/webman` 三件套命中的目录） */
+    protected string $rollingRoot = '';
+
     /** 包内类名 -> 文件路径索引（extends 链解析用；按包目录缓存） */
     protected array $classFileIndex = [];
 
@@ -102,7 +113,8 @@ class AuditService
 
     /**
      * 目录候选解析（CLI --root/自动探测也复用）：接受「含 radmin 的 src 根」
-     * 或「含 src/radmin 的工作区根」，统一返回 src 根；无效返回空串
+     * 或「含 src/radmin 的工作区根」，统一返回 src 根；Rolling 工作区（`app/` + `plugin/` +
+     * webman 入口三件套，无 src/ 布局）返回其工作区根；无效返回空串
      */
     public function resolveCandidate(string $dir): string
     {
@@ -116,7 +128,46 @@ class AuditService
         if (is_dir("$dir/src/radmin")) {
             return "$dir/src";
         }
+        if ($this->isRollingWorkspace($dir)) {
+            return $dir;
+        }
         return '';
+    }
+
+    /**
+     * Rolling 工作区判定（`app/` 主应用 + `plugin/` 业务插件 + webman 入口）
+     */
+    public function isRollingWorkspace(string $dir): bool
+    {
+        $dir = rtrim($dir, '/');
+        return is_dir("$dir/plugin") && is_dir("$dir/app")
+            && (is_file("$dir/start.php") || is_file("$dir/webman"));
+    }
+
+    /**
+     * 规则内源码路径解析（布局适配唯一出口）
+     *
+     * family：`<unit>/src/<rel>`；rolling：`<unit>/<rel>`（rolling 的单元根即含 `app/` 的目录：
+     * 主单元 = 工作区根、插件单元 = `plugin/<名>`，故 `app/admin/controller` 等相对段两边同形）。
+     */
+    protected function srcPath(string $dir, string $rel = ''): string
+    {
+        $rel = ltrim($rel, '/');
+        $dir = rtrim($dir, '/');
+        return $this->layout === 'rolling'
+            ? ($rel === '' ? $dir : "$dir/$rel")
+            : ($rel === '' ? "$dir/src" : "$dir/src/$rel");
+    }
+
+    /**
+     * 迁移目录解析：rolling 布局是**单库单目录**（工作区根 `database/migrations`，不随插件分目录；
+     * 迁移文件头注明归属插件），故所有单元共用一处；family 布局仍是各包自己的 `database/migrations`。
+     */
+    protected function migrationsDir(string $dir): string
+    {
+        return $this->layout === 'rolling'
+            ? $this->rollingRoot . '/database/migrations'
+            : rtrim($dir, '/') . '/database/migrations';
     }
 
     /**
@@ -144,6 +195,10 @@ class AuditService
      */
     public function audit(string $root, array $pkgs, array $codes = []): array
     {
+        // 布局判定（每轮按 root 决定；family 缺省，规则产物与历史一致）
+        $root              = rtrim($root, '/');
+        $this->layout      = $this->isRollingWorkspace($root) ? 'rolling' : 'family';
+        $this->rollingRoot = $this->layout === 'rolling' ? $root : '';
         $this->migrationScan = null;
         $this->happBlindScan = null;
         $this->iconBlindScan = null;
@@ -338,7 +393,7 @@ class AuditService
 
     protected function checkController(string $root, string $pkg, string $dir): ?array
     {
-        $ctrlDir = "$dir/src/app/admin/controller";
+        $ctrlDir = $this->srcPath($dir, 'app/admin/controller');
         if (!is_dir($ctrlDir)) {
             return null;
         }
@@ -379,8 +434,8 @@ class AuditService
 
     protected function checkPermission(string $root, string $pkg, string $dir): ?array
     {
-        $ctrlDir = "$dir/src/app/admin/controller";
-        $migDir = "$dir/database/migrations";
+        $ctrlDir = $this->srcPath($dir, 'app/admin/controller');
+        $migDir = $this->migrationsDir($dir);
         if (!is_dir($ctrlDir) || !is_dir($migDir)) {
             return null;
         }
@@ -432,7 +487,8 @@ class AuditService
     {
         $scan = $this->workspaceMigrations($root);
         $issues = [];
-        $mine = basename($dir) . '/';
+        // 归属前缀：family 按包目录（`radmin/...`）；rolling 是单库单目录（`database/migrations/...`）
+        $mine = $this->layout === 'rolling' ? 'database/migrations/' : basename($dir) . '/';
         foreach ($scan['duplicates'] as $stamp => $files) {
             if (isset($this->reportedMigrationStamps[$stamp]) || !$this->migrationBelongsToPackage($files, $dir)) {
                 continue;
@@ -483,6 +539,12 @@ class AuditService
             foreach (glob("$root/*/database/$set/*.php") ?: [] as $file) {
                 $candidates[$file] = str_replace($root . '/', '', $file);
             }
+            // rolling 布局：工作区根的单库迁移目录（`<ws>/database/migrations`，插件迁移也落这里）
+            if ($this->layout === 'rolling') {
+                foreach (glob("$root/database/$set/*.php") ?: [] as $file) {
+                    $candidates[$file] = str_replace($root . '/', '', $file);
+                }
+            }
             foreach (glob("$root/../dev/*/database/$set/*.php") ?: [] as $file) {
                 $candidates[$file] = str_replace($root . '/../', '', $file);
             }
@@ -520,7 +582,7 @@ class AuditService
      */
     protected function migrationBelongsToPackage(array $files, string $dir): bool
     {
-        $package = basename($dir) . '/';
+        $package = $this->layout === 'rolling' ? 'database/migrations/' : basename($dir) . '/';
         foreach ($files as $file) {
             if (str_starts_with($file, $package)) {
                 return true;
@@ -533,17 +595,17 @@ class AuditService
 
     protected function checkResidue(string $root, string $pkg, string $dir): ?array
     {
-        if (!is_dir("$dir/src")) {
+        if (!is_dir($this->srcPath($dir))) {
             return null;
         }
         $issues = [];
         foreach (['controller/Test.php', 'model/Test.php', 'validate/Test.php'] as $residue) {
-            if (is_file("$dir/src/app/admin/$residue")) {
+            if (is_file($this->srcPath($dir, "app/admin/$residue"))) {
                 $issues[] = "scaffold residue: src/app/admin/$residue";
             }
         }
         $todo = 0;
-        foreach ($this->phpFiles("$dir/src") as $f) {
+        foreach ($this->phpFiles($this->srcPath($dir)) as $f) {
             if (basename($f) === 'AuditService.php') {
                 continue; // 审计引擎自身含探测器模式字面量（TODO|FIXME|HACK 正则），自扫必误报
             }
@@ -1018,7 +1080,7 @@ class AuditService
      */
     protected function checkAsyncBlocking(string $root, string $pkg, string $dir): ?array
     {
-        $appDir = "$dir/src/app";
+        $appDir = $this->srcPath($dir, 'app');
         if (!is_dir($appDir)) {
             return null;
         }
@@ -1081,7 +1143,7 @@ class AuditService
 
     protected function checkFqcnDup(string $root, string $pkg, string $dir): ?array
     {
-        if (!is_dir("$dir/src")) {
+        if (!is_dir($this->srcPath($dir))) {
             return null;
         }
         $issues = [];
@@ -1110,7 +1172,7 @@ class AuditService
 
     protected function checkSuperglobal(string $root, string $pkg, string $dir): ?array
     {
-        $appDir = "$dir/src/app";
+        $appDir = $this->srcPath($dir, 'app');
         if (!is_dir($appDir)) {
             return null;
         }
@@ -1141,11 +1203,11 @@ class AuditService
 
     protected function checkDeadCode(string $root, string $pkg, string $dir): ?array
     {
-        if (!is_dir("$dir/src")) {
+        if (!is_dir($this->srcPath($dir))) {
             return null;
         }
         $issues = [];
-        if (!is_dir("$dir/src/app/admin")) {
+        if (!is_dir($this->srcPath($dir, 'app/admin'))) {
             // SDK 包（无后台管理端，如 channel-client/oidc-client）：类为公共 API，由外部宿主/调用方消费，
             // 工作区内零引用是常态，跳过死类判定
             return ['issues' => [], 'note' => 'SDK 公共 API 包（无 src/app/admin）跳过'];
@@ -1182,7 +1244,7 @@ class AuditService
 
     protected function checkCrossCopy(string $root, string $pkg, string $dir): ?array
     {
-        if (!is_dir("$dir/src") && !is_dir("$dir/config")) {
+        if (!is_dir($this->srcPath($dir)) && !is_dir("$dir/config")) {
             return null;
         }
         $issues = [];
@@ -1217,7 +1279,7 @@ class AuditService
      */
     protected function checkDtoContract(string $root, string $pkg, string $dir): ?array
     {
-        $appDir = "$dir/src/app";
+        $appDir = $this->srcPath($dir, 'app');
         if (!is_dir($appDir)) {
             return null;
         }
@@ -1366,7 +1428,7 @@ class AuditService
      */
     protected function checkLlmGate(string $root, string $pkg, string $dir): ?array
     {
-        $appDir = "$dir/src/app";
+        $appDir = $this->srcPath($dir, 'app');
         if (!is_dir($appDir)) {
             return null;
         }
@@ -1642,8 +1704,8 @@ class AuditService
         $key = rtrim($dir, '/');
         if (!isset($this->classFileIndex[$key])) {
             $index = [];
-            if (is_dir("$dir/src")) {
-                foreach ($this->phpFiles("$dir/src") as $f) {
+            if (is_dir($this->srcPath($dir))) {
+                foreach ($this->phpFiles($this->srcPath($dir)) as $f) {
                     $index[basename($f, '.php')][] = $f;
                 }
             }
@@ -1842,7 +1904,7 @@ class AuditService
      */
     protected function checkComsearchContract(string $root, string $pkg, string $dir): ?array
     {
-        $ctrlDir = "$dir/src/app/admin/controller";
+        $ctrlDir = $this->srcPath($dir, 'app/admin/controller');
         if (!is_dir($ctrlDir)) {
             return null;
         }
@@ -1875,7 +1937,7 @@ class AuditService
 
     protected function checkOrmMigrated(string $root, string $pkg, string $dir): ?array
     {
-        if (!is_dir("$dir/src")) {
+        if (!is_dir($this->srcPath($dir))) {
             return null;
         }
         // think-orm 残留模式；webman-dev 自身种子迁移/CLI 工具里历史文件
@@ -2020,7 +2082,7 @@ class AuditService
      */
     protected function checkEventStandard(string $root, string $pkg, string $dir): ?array
     {
-        $appDir = "$dir/src/app";
+        $appDir = $this->srcPath($dir, 'app');
         if (!is_dir($appDir)) {
             return null;
         }
@@ -2296,7 +2358,7 @@ class AuditService
      */
     protected function checkCommonUtils(string $root, string $pkg, string $dir): ?array
     {
-        $srcDir = "$dir/src";
+        $srcDir = $this->srcPath($dir);
         if (!is_dir($srcDir)) {
             return null;
         }
@@ -2372,7 +2434,7 @@ class AuditService
      */
     protected function checkInstallStandard(string $root, string $pkg, string $dir): ?array
     {
-        $file = "$dir/src/Install.php";
+        $file = $this->srcPath($dir, 'Install.php');
         if (!is_file($file)) {
             return null;
         }

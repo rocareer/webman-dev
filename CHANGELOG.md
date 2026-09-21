@@ -1,3 +1,28 @@
+## [v3.26.0] - 2026-09-21
+
+### feat(audit): 审计支持 Rolling 布局（`app/` + `plugin/<名>/app/**` 工作区）——22 条规则不再只认家族包 `src/`
+
+此前 `rocareer:audit` 只认家族包布局（`<pkg>/src/app/**`），对 Rolling 这类工作区直接报
+`workspace root not found`（实测 `--root=<Rolling>`）——即 Rolling 自身的 `app/` 与 9 个插件的代码
+**完全在审查射程之外**，其「门禁」只剩语法/图标/前端 typecheck 三条。
+
+- **布局判定**：`resolveCandidate()` 增加 Rolling 工作区识别（`plugin/` + `app/` + `start.php|webman` 三件套）→
+  返回工作区根；`audit()` 每轮判定 `layout`（`family` 缺省 / `rolling`）并记录 `rollingRoot`。
+- **路径统一出口 `srcPath()`**：规则内 12 处硬编码 `"$dir/src/..."` 收束为 `$this->srcPath($dir, 'app/admin/controller')` 等——
+  family 仍是 `<unit>/src/<rel>`（**产物与历史逐字节一致**，已用 radmin/webman-dev 两包前后输出对比验证）；
+  rolling 映射为 `<unit>/<rel>`（单元根 = 含 `app/` 的那层：主单元 = 工作区根、插件单元 = `plugin/<名>`，
+  故 `app/admin/controller` 等相对段两边同形）。
+- **迁移口径 `migrationsDir()`**：rolling 是**单库单目录**（工作区根 `database/migrations`，插件迁移同落此处并在文件头注明归属）；
+  `workspaceMigrations()` 增补工作区根迁移的扫描（撞号/畸形/静默忽略三类判据照旧，跨插件撞号同样拦）；
+  `checkMigration` 的归属前缀与 `migrationBelongsToPackage()` 在 rolling 下统一为 `database/migrations/`（配合
+  `reportedMigrationStamps` 去重，多单元不重复报）；`permission` 规则的按钮来源目录同走 `migrationsDir()`。
+- **自然跳过项**（不改行为）：`version`（依赖 `../dev/*/composer.json` 钉版，rolling 无此概念 → 既有 `!$hosts` 守卫直接 not-applicable）、
+  `install_standard`（rolling 插件无 `src/Install.php` → 既有守卫跳过）。
+- **已知限制（如实）**：`common_utils` 按 `<unit>/composer.json` 判「是否依赖 radmin」——rolling 插件单元无 composer.json，
+  会被当纯 SDK 跳过（不误报，但也不覆盖）；`cross_copy` 在 rolling 下按工作区扫，覆盖面与 family 口径一致。
+- **实测**：`rocareer:audit --root=<Rolling> --pkg=ops` 等可正常扫描 Rolling 单元（此前直接 root not found）；
+  家族布局回归：`--root=<vendor/rocareer> --pkg=radmin|webman-dev` 输出与 v3.25.1 逐字节相同。
+
 ## [v3.25.1] - 2026-09-21
 
 ### fix(crud-design): AI 草稿提示词升 v3——落位 target 块从「被模型丢掉」到「需求有就必须原样体现」
