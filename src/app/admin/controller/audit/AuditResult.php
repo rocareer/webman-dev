@@ -30,7 +30,11 @@ class AuditResult extends Backend
      */
     public function index(): Response
     {
-        $query = DevAuditResult::orderBy('run_at', 'desc')->orderBy('id', 'desc');
+        $query = DevAuditResult::query();
+        // 列表契约：高级检索（search）+ 列头排序（order=field,dir，用户排序优先）
+        $this->applyListQueryContract($query, new DevAuditResult());
+        // 默认排序兜底（契约之后追加，用户显式排序时退居次要键）
+        $query->orderBy('run_at', 'desc')->orderBy('id', 'desc');
         $latest = (int) $this->request->input('latest', 0);
         if ($latest) {
             $max = (int) DevAuditResult::max('run_at');

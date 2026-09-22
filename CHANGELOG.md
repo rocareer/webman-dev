@@ -1,3 +1,14 @@
+## [v3.29.1] - 2026-09-22
+
+### fix(audit): 审计结果列表接 radmin 列表契约——列头排序（order）与高级检索（search）真生效
+
+- **症状**：`audit.AuditResult::index` 手写实现（`DevAuditResult::orderBy('run_at','desc')->orderBy('id','desc')`），
+  **不读 `order`** ⇒ 「代码审计 → 审计结果」页点表头排序无反应（同包的 `AuditProject`/`AuditRule` 早已接
+  `queryBuilder()`，三页行为不一致）。
+- **做法**：改 `DevAuditResult::query()` + `$this->applyListQueryContract($query, new DevAuditResult())`，
+  默认 `run_at desc, id desc` **追加在契约之后**（用户排序优先、默认退居次要键，无 `order` 时行为不变）。
+- **实测**（宿主 Rolling，`?order=id,asc|desc`）：1,2,3,4 升序 / 53,52,51,50 降序（旧版两种都返回同一顺序）。
+
 ## [v3.29.0] - 2026-09-22
 
 ### feat(audit): 新增 frontend_raw_fetch 规则——前端禁裸 fetch/XHR（业务码信封唯一出口）
