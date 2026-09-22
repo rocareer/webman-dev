@@ -1,3 +1,14 @@
+## [v3.28.2] - 2026-09-22
+
+### fix(audit): radmin_dev_audit_result 补 update_time 列（建表迁移漏列，落库即 42703）
+
+- 建表迁移（20260827090211）给 `radmin_dev_audit_project`/`radmin_dev_audit_rule` 都加了
+  `update_time`，唯独漏了 `radmin_dev_audit_result`——radmin BaseModel 自动时间戳在 save()
+  时写该列，审计「运行」一落库即 `SQLSTATE[42703] Undefined column`（同步/异步同炸；
+  此前未被发现的 traced 原因：结果落库只在页面 run 路径，CLI 审计不落库）。
+- 修复：新迁移 `20260922084602_radmin_dev_audit_result_add_update_time`（幂等：先查
+  information_schema 再 ALTER；Rolling 异步审计作业化冒烟时暴露）。
+
 ## [v3.28.1] - 2026-09-22
 
 ### fix(install): 接线落盘改「存在即跳过」——composer update 会以 install(isFirst=true) 重拷覆盖宿主
