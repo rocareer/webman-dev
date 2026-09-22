@@ -1,3 +1,19 @@
+## [v3.28.0] - 2026-09-22
+
+### feat(audit): 「运行审计」可作业化（async=1），执行体抽取 runProjects 共享
+
+- **`AuditProject::run` 新增 `async=1`**：校验后经 rocareer/queue 作业层（`Job::submit`，宿主
+  `audit-run` 队列）立即返回 `job_id`，执行与收口在队列消费，终态随 `job.settled` 帧定向推给
+  提交者（受众=作业层提交时解析器）；作业层未安装时**显式报错不静默降级**。缺省（无 async）
+  同步路径行为与历史逐字节一致，存量宿主零影响。
+- **执行体抽取 `AuditService::runProjects(array $projectIds = [])`**：取项目与启用规则 →
+  `audit()` 全量 → `dev_audit_result` 逐规则落库 + 项目快照回写 → 返回轮次汇总；同步控制器与
+  宿主消费类共用，消除双份落库/汇总逻辑。执行可达分钟级——子进程执行自带 fiber 协程回退，
+  可安全挂在 fiber 消费进程。
+- **宿主接入清单**（Rolling 同批落地）：消费类 `app/queue/redis/AuditRunConsumer.php`
+  （queue=audit-run，batch 组，QueueConsume 记账）+ 队列元数据（plugin=app / biz_kind=audit_run /
+  biz_field=ids）+ 前端 `waitJob` 零轮询收尾。
+
 ## [v3.27.0] - 2026-09-21
 
 ### feat(audit): 审计扩展协议——基础设施出引擎，业务端出规则（config/audit.php）

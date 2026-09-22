@@ -2,6 +2,10 @@
 
 namespace app\admin\service;
 
+use app\admin\model\DevAuditProject;
+use app\admin\model\DevAuditResult;
+use app\admin\model\DevAuditRule;
+
 /**
  * 工程质量审计引擎（webman-dev）
  *
@@ -362,6 +366,99 @@ class AuditService
         }
         sort($units);
         return $units;
+    }
+
+    /**
+     * 跑一轮项目审计并落库（后台「运行审计」的共享执行体）
+     *
+     * 控制器同步路径与队列异步消费（宿主 AuditRunConsumer）共用：取项目与启用规则 →
+     * audit() 全量审计 → dev_audit_result 逐规则落库 + 项目快照回写 → 返回轮次汇总。
+     * 执行体可达分钟级（php -l 批量子进程为主）——子进程执行带 fiber 协程回退（本类内），
+     * 挂在 fiber 事件循环的消费进程里可安全让出；失败抛 RuntimeException（消息即页面提示）。
+     *
+     * @param array $projectIds 项目 id 白名单（空 = 全部启用项目）
+     * @return array {run_at:int, total_issues:int, audited_projects:int, fail_projects:int, summary:list}
+     * @throws \RuntimeException 没有可审计项目 / 未定位到源码根
+     */
+    public function runProjects(array $projectIds = []): array
+    {
+        $query = DevAuditProject::where('status', DevAuditProject::STATUS_ENABLED);
+        if ($projectIds !== []) {
+            $query = $query->whereIn('id', $projectIds);
+        }
+        $projects = $query->get();
+        if (empty($projects)) {
+            throw new \RuntimeException('没有可审计的项目（请先添加/启用项目）');
+        }
+        // 启用中的规则 code（页面可停用规则临时缩小审计范围）
+        $codes = DevAuditRule::where('status', DevAuditRule::STATUS_ENABLED)->pluck('name')->all();
+        $root = $this->rootPath();
+        if ($root === '') {
+            throw new \RuntimeException('未定位到工作区源码根目录（含 radmin 的 src 根），请在插件配置 plugin.rocareer.webman-dev.app.audit_root 设置');
+        }
+        $pkgs = [];
+        $projectMap = [];
+        foreach ($projects as $p) {
+            $pkgs[] = $p->name;
+            $projectMap[$p->name] = $p;
+        }
+        $result = $this->audit($root, $pkgs, $codes);
+
+        $now = time();
+        $summary = [];
+        $totalIssues = 0;
+        $failProjects = 0;
+        foreach ($result['packages'] as $pkgData) {
+            $project = $projectMap[$pkgData['name']] ?? null;
+            if (!$project) {
+                continue;
+            }
+            $failRules = [];
+            $issueTotal = 0;
+            foreach ($pkgData['rules'] as $rule) {
+                if (!$rule['skipped'] && !$rule['pass']) {
+                    $failRules[] = $rule['title'];
+                    $issueTotal += $rule['count'];
+                }
+                $row = new DevAuditResult();
+                $row->project_id = (int) $project->id;
+                $row->project_name = (string) $project->name;
+                $row->rule_code = (string) $rule['code'];
+                $row->rule_title = (string) $rule['title'];
+                $row->is_pass = $rule['pass'] ? DevAuditResult::PASS_YES : DevAuditResult::PASS_NO;
+                $row->issue_count = (int) $rule['count'];
+                $row->detail = json_unicode($rule['issues']);
+                $row->run_at = $now;
+                $row->create_time = $now;
+                $row->save();
+            }
+            $p = DevAuditProject::find((int) $project->id);
+            if ($p) {
+                $p->last_run_at = $now;
+                $p->last_issue_count = $issueTotal;
+                $p->last_fail_rules = json_encode(array_slice($failRules, 0, 10), JSON_UNESCAPED_UNICODE);
+                $p->update_time = $now;
+                $p->save();
+            }
+            $totalIssues += $issueTotal;
+            if ($issueTotal > 0) {
+                $failProjects++;
+            }
+            $summary[] = [
+                'name' => (string) $project->name,
+                'title' => (string) $project->title,
+                'issue_total' => $issueTotal,
+                'fail_rules' => $failRules,
+                'rules' => count($pkgData['rules']),
+            ];
+        }
+        return [
+            'run_at' => $now,
+            'total_issues' => $totalIssues,
+            'audited_projects' => count($summary),
+            'fail_projects' => $failProjects,
+            'summary' => $summary,
+        ];
     }
 
     /**

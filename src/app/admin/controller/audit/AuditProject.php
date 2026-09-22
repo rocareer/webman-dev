@@ -18,7 +18,8 @@ use Throwable;
  *       stats GET 顶部统计条。
  * 说明：项目表 name 为 src 根下的包目录名（radmin/ai/...）；run 执行整轮审计并落库
  *       dev_audit_result，同时回写项目快照（last_run_at/last_issue_count/last_fail_rules）。
- *       run 为管理员手动触发的同步操作（php -l 批量子进程），非 LLM 链路。
+ *       run 为管理员手动触发（php -l 批量子进程），非 LLM 链路；缺省同步返回汇总，
+ *       async=1 时经 rocareer/queue 作业层投宿主 audit-run 队列异步执行（返回 job_id）。
  */
 class AuditProject extends Backend
 {
@@ -156,10 +157,15 @@ class AuditProject extends Backend
      * 运行审计（核心）
      *
      * POST /admin/audit/auditproject/run
-     * 参数：ids/a 可选（空 = 全部启用项目）
-     * 流程：取启用的规则 code + 项目包名 -> AuditService 全量审计 ->
-     *       结果写入 dev_audit_result（每项目每规则一行，run_at 为轮次）+
-     *       回写项目快照列；返回本轮汇总供前端提示。
+     * 参数：ids/a 可选（空 = 全部启用项目）；async=1 可选（作业化运行）。
+     * 流程：同步（缺省）= 取启用的规则 code + 项目包名 -> AuditService::runProjects 全量审计
+     *       -> 结果写入 dev_audit_result（每项目每规则一行，run_at 为轮次）+ 回写项目快照列，
+     *       返回本轮汇总供前端提示；
+     *       异步（async=1，2026-09-22 加，Rolling「长任务交互全走 WS 回流」）= 校验后经作业层
+     *       （rocareer/queue 的 Job）投宿主 `audit-run` 队列立即返回 job_id——执行与收口在队列
+     *       消费（宿主 AuditRunConsumer 调同一 runProjects），终态随 `job.settled` 帧定向推给
+     *       提交者（受众=作业层提交时解析器），前端 waitJob 零轮询收尾。作业层未安装时不静默
+     *       降级，显式报错。
      */
     public function run(): Response
     {
@@ -169,85 +175,24 @@ class AuditProject extends Backend
             $raw = $raw === '' ? [] : explode(',', $raw);
         }
         $ids = is_array($raw) ? array_values(array_filter(array_map('intval', $raw))) : [];
-        $query = DevAuditProject::where('status', DevAuditProject::STATUS_ENABLED);
-        if (!empty($ids)) {
-            $query = $query->whereIn('id', $ids);
-        }
-        $projects = $query->get();
-        if (empty($projects)) {
-            return $this->error('没有可审计的项目（请先添加/启用项目）');
-        }
-        // 启用中的规则 code（页面可停用规则临时缩小审计范围）
-        $codes = DevAuditRule::where('status', DevAuditRule::STATUS_ENABLED)->pluck('name')->all();
 
-        $service = new AuditService();
-        $root = $service->rootPath();
-        if ($root === '') {
-            return $this->error('未定位到工作区源码根目录（含 radmin 的 src 根），请在插件配置 plugin.rocareer.webman-dev.app.audit_root 设置');
+        if (filter_var($this->request->post('async'), FILTER_VALIDATE_BOOL)) {
+            if (!class_exists(\app\queue\service\Job::class)) {
+                return $this->error('当前环境未安装 rocareer/queue 作业层，不支持异步审计（可去掉 async 参数走同步）');
+            }
+            try {
+                $jobId = \app\queue\service\Job::submit('audit-run', ['biz_kind' => 'audit_run', 'ids' => $ids], 'audit_run');
+            } catch (Throwable $e) {
+                return $this->error('异步审计投递失败: ' . $e->getMessage());
+            }
+            return $this->success('已投递后台审计', ['job_id' => $jobId, 'async' => true]);
         }
-        $pkgs = [];
-        $projectMap = [];
-        foreach ($projects as $p) {
-            $pkgs[] = $p->name;
-            $projectMap[$p->name] = $p;
-        }
-        $result = $service->audit($root, $pkgs, $codes);
 
-        $now = time();
-        $summary = [];
-        $totalIssues = 0;
-        $failProjects = 0;
-        foreach ($result['packages'] as $pkgData) {
-            $project = $projectMap[$pkgData['name']] ?? null;
-            if (!$project) {
-                continue;
-            }
-            $failRules = [];
-            $issueTotal = 0;
-            foreach ($pkgData['rules'] as $rule) {
-                if (!$rule['skipped'] && !$rule['pass']) {
-                    $failRules[] = $rule['title'];
-                    $issueTotal += $rule['count'];
-                }
-                $row = new DevAuditResult();
-                $row->project_id = (int) $project->id;
-                $row->project_name = (string) $project->name;
-                $row->rule_code = (string) $rule['code'];
-                $row->rule_title = (string) $rule['title'];
-                $row->is_pass = $rule['pass'] ? DevAuditResult::PASS_YES : DevAuditResult::PASS_NO;
-                $row->issue_count = (int) $rule['count'];
-                $row->detail = json_unicode($rule['issues']);
-                $row->run_at = $now;
-                $row->create_time = $now;
-                $row->save();
-            }
-            $p = DevAuditProject::find((int) $project->id);
-            if ($p) {
-                $p->last_run_at = $now;
-                $p->last_issue_count = $issueTotal;
-                $p->last_fail_rules = json_encode(array_slice($failRules, 0, 10), JSON_UNESCAPED_UNICODE);
-                $p->update_time = $now;
-                $p->save();
-            }
-            $totalIssues += $issueTotal;
-            if ($issueTotal > 0) {
-                $failProjects++;
-            }
-            $summary[] = [
-                'name' => (string) $project->name,
-                'title' => (string) $project->title,
-                'issue_total' => $issueTotal,
-                'fail_rules' => $failRules,
-                'rules' => count($pkgData['rules']),
-            ];
+        try {
+            return $this->success('审计完成', (new AuditService())->runProjects($ids));
+        } catch (Throwable $e) {
+            return $this->error($e->getMessage());
         }
-        return $this->success('审计完成', [
-            'run_at' => $now,
-            'total_issues' => $totalIssues,
-            'audited_projects' => count($summary),
-            'fail_projects' => $failProjects,
-            'summary' => $summary,
-        ]);
     }
 
     /**
