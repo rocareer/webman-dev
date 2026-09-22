@@ -246,6 +246,7 @@ class Audit extends Command
             'install_standard' => 'install standard',
             'comsearch_contract' => 'comSearch 契约（禁手写解析 search）',
             'icon_attr' => 'el icon 属性（禁 CSS 类名）',
+            'frontend_raw_fetch' => 'frontend raw fetch（禁裸 fetch/XHR）',
             'coverage' => 'audit coverage',
         ][$code] ?? $code;
     }

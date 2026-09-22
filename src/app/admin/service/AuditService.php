@@ -45,6 +45,7 @@ class AuditService
         'install_standard' => ['title' => 'Install.php 标准化', 'description' => 'Install.php 标准化门禁（见 docs/install-standard.md）：WEBMAN_PLUGIN 常量、install/update/uninstall 三钩子齐全、install 签名兼容官方 Install::install(true)（禁强类型参数）、禁官方骨架残留 copy_dir/remove_dir（显式 overwrite=true 的 copy_dir 除外）与 array() 语法、类前中文头注释；文件标注 @audit-ignore install_standard 显式豁免'],
         'icon_attr' => ['title' => 'el 组件 icon 属性禁传 CSS 类名', 'description' => 'Element Plus 组件 icon 类属性（icon/:icon）按组件渲染：传 fa fa-* 等类名字符串会 createElement(类名) 抛 InvalidCharacterError，页面白屏且此后所有菜单点击空白（dataio 导入向导与 print-erp 双实证）；.vue 内 icon="fa / :icon="fa / :icon="形式即报；合法形态 = <Icon name="fa fa-*" /> 子节点（Icon 经 common.ts 全局注册）或已注册组件名；radmin 同步树跳过（真源在各包 web/），dev 宿主工程 web 树、super/web/src、skyline 盲区由 radmin 条目承载 sweep；文件标注 @audit-ignore icon_attr 显式豁免'],
         'vue_theme_hardcode' => ['title' => 'Vue 主题色硬编码门禁（EP 调色板）', 'description' => 'Element Plus 官方默认调色板色值（#409eff/#67c23a/#e6a23c/#f56c6c/#909399/#ecf5ff/#d9ecff）写死在 .vue 的 <style>/<template> 段 = 本该走主题变量的语义色被固化——用户切换主题色/暗色模式后与全站脱节（print-erp flow 节点状态色实证，2026-09-17 前端全域样式审计）；合法形态 = var(--el-color-*, 色值) 带 fallback 双写（扫描前剔除再匹配）；<script> 段不扫（ECharts/SVG 画布色板属运行时配置，主题跟随可选 getComputedStyle 快照）；打印纸张预览区白底语义属有意设计，注释声明即可；扫描范围 = dev 宿主工程 web 树（radmin 条目承载 sweep），相对路径在 radmin/web/src 存在同路径文件的「全家桶继承页」跳过（真源在 radmin，上游存量不由宿主修），src 各包 web 树存量待自行收口后开启；文件标注 @audit-ignore vue_theme_hardcode 显式豁免'],
+        'frontend_raw_fetch' => ['title' => '前端禁裸 fetch/XHR（业务码信封唯一出口）', 'description' => '全栈 API 契约 = HTTP 200 + 业务码信封 {code,msg,time,data}（见 radmin support/StatusCode.php 头注释「业务码≠HTTP 码」），createAxios 拦截器按业务码分诊（409 续期/303 回登录/非 1 红错）——页面裸 fetch/XHR 绕过信封解析只看 res.ok，HTTP 恒 200 时把业务错误当成功（print-erp 导出「假成功」实证：wh1 无导出权限，HTTP 200+code 401 的错误 JSON 被当 CSV 下载，绿 toast 打开全是 error_trace，20260922 收口）；前端调 admin API 一律走 createAxios，文件流下载一律走 utils/download.ts（downloadByToken/runDownload 单一真源：token 头+内容类型判错误体+blob 保存）；扫描各包 web/src 与全域盲区（dev 宿主工程 web 树、super/web/src——skyline 小程序无 fetch API 不扫；radmin 同步树跳过由 radmin 条目承载 sweep）内出现 fetch( 或 new XMLHttpRequest 即报（扫描前剥离单行/块级/HTML 三类注释防自指假命中）；utils/download.ts 与 utils/happClient.ts（SDK 真源）与标注 @audit-ignore frontend_raw_fetch 豁免，且豁免文件内已无裸调用时反向报「请收敛豁免清单」（例外清单双向断言）；radmin/web/src 存在同路径文件的「全家桶继承页」跳过（真源在 radmin/BuildAdmin 上游，宿主不修，同 vue_theme_hardcode 先例）'],
     ];
 
     /** 问题明细入库/返回上限（完整数量在 count） */
@@ -61,6 +62,9 @@ class AuditService
 
     /** 此轮 Vue 主题色硬编码盲区扫描结果（radmin 条目承载，audit() 内重置） */
     protected ?array $themeBlindScan = null;
+
+    /** 此轮前端裸 fetch/XHR 盲区扫描结果（radmin 条目承载，audit() 内重置） */
+    protected ?array $rawFetchBlindScan = null;
 
     /** 本轮已归属过迁移冲突的时间戳（避免全量审计重复报错） */
     protected array $reportedMigrationStamps = [];
@@ -478,6 +482,7 @@ class AuditService
         $this->happBlindScan = null;
         $this->iconBlindScan = null;
         $this->themeBlindScan = null;
+        $this->rawFetchBlindScan = null;
         $this->reportedMigrationStamps = [];
         // 常驻进程（MCP worker / 后台管理页）跨轮次复用本引擎：每轮清空静态扫描缓存，
         // 否则改码后 quality_audit 仍读上一轮文件快照 → 假 PASS/假 FAIL
@@ -505,6 +510,7 @@ class AuditService
             'comsearch_contract' => 'no admin controllers',
             'icon_attr' => 'web sources: none',
             'vue_theme_hardcode' => 'web sources: none',
+            'frontend_raw_fetch' => 'frontend sources: none',
         ];
         $packages = [];
         foreach ($pkgs as $name) {
@@ -1361,6 +1367,140 @@ class AuditService
             }
         }
         return '';
+    }
+
+
+    /* ---------- 7f. 前端禁裸 fetch/XHR（业务码信封唯一出口） ---------- */
+
+    /** 裸调用探测模式（扫描前已剥注释，注释里的示例/文档不会假命中） */
+    protected const RAW_FETCH_PATTERNS = [
+        'fetch(' => '~\bfetch\s*\(~',
+        'new XMLHttpRequest' => '~new\s+XMLHttpRequest~',
+    ];
+
+    /** 下载助手单一真源 + happ-client SDK 真源（各 web 树相对路径一致；仅这些文件允许裸 fetch） */
+    protected const RAW_FETCH_EXEMPT = ['utils/download.ts', 'utils/happClient.ts'];
+
+    /**
+     * 前端裸 fetch/XHR 检查：src 包扫自家 web/src；radmin 同步树（真源在各包 web/）跳过，
+     * 由 radmin 条目承载全域盲区 sweep（同 happ_frontend/icon_attr 先例）
+     */
+    protected function checkFrontendRawFetch(string $root, string $pkg, string $dir): ?array
+    {
+        if ($pkg === 'radmin') {
+            return $this->sweepFrontendRawFetchBlind($root);
+        }
+        $webDir = "$dir/web/src";
+        if (!is_dir($webDir)) {
+            return null;
+        }
+        return $this->scanFrontendRawFetchTree($webDir, $root);
+    }
+
+    /**
+     * 裸 fetch/XHR 全域盲区扫描（radmin 条目承载）：dev 宿主工程 web 源码树、super/web/src
+     * 不属于任何 src 包，包级规则扫不到（与 sweepHappFrontendBlind 同款盲区先例）。
+     * skyline 小程序不扫：小程序运行时没有 fetch/XHR API（网络面是 wx.request，归平台规范管）。
+     * 每轮审计只扫一次（实例缓存，audit() 内重置）；产物目录豁免、utils/download.ts 豁免、
+     * @audit-ignore frontend_raw_fetch 文件豁免；豁免文件双向断言（无裸调用即报收敛）。
+     */
+    protected function sweepFrontendRawFetchBlind(string $root): ?array
+    {
+        if ($this->rawFetchBlindScan !== null) {
+            return $this->rawFetchBlindScan;
+        }
+        $ws = dirname($root);
+        $trees = [];
+        foreach (array_merge(
+            glob($ws . '/dev/*/web/src') ?: [],
+            glob($ws . '/super/web/src') ?: []
+        ) as $tree) {
+            if (is_dir($tree)) {
+                $trees[] = $tree;
+            }
+        }
+        if (count($trees) === 0) {
+            return null;
+        }
+        $issues = [];
+        $checked = 0;
+        $radminWeb = $ws . '/src/radmin/web/src';
+        foreach ($trees as $tree) {
+            $res = $this->scanFrontendRawFetchTree($tree, $ws, $radminWeb);
+            $issues = array_merge($issues, $res['issues']);
+            $checked += (int) ($res['checked'] ?? 0);
+        }
+        $result = ['issues' => $issues, 'note' => $checked . ' blind-tree files (dev/super，radmin 同路径继承页已跳过)'];
+        $this->rawFetchBlindScan = $result;
+        return $result;
+    }
+
+    /**
+     * 扫一棵 web/src 树：裸 fetch( / new XMLHttpRequest 即报
+     *
+     * 判据口径（静态Discipline 门禁五坑教训）：①扫描前剥离单行、块级与 HTML 三类注释，
+     * 文档/示例里的字面量不假命中；②豁免文件（download/happClient SDK 真源）双向断言——
+     * 存在但剥注释后已无裸调用 → 报「请收敛豁免清单」，防豁免变陈旧摆设；③命中必须给出
+     * 替换指引；④radmin 同路径继承文件（全家桶 web 全量拷贝宿主的上游存量）跳过不报
+     * （真源在 radmin/BuildAdmin 上游，宿主不修——同 vue_theme_hardcode 先例）。
+     *
+     * @return array{issues: string[], checked: int}
+     */
+    protected function scanFrontendRawFetchTree(string $webDir, string $root, ?string $radminWeb = null): array
+    {
+        $issues = [];
+        $checked = 0;
+        $exemptHit = [];
+        foreach ($this->webSourceFiles($webDir) as $file) {
+            if (preg_match('#/(node_modules|dist|public|unpackage|miniprogram_npm|vendor)/#', $file)) {
+                continue;
+            }
+            $relInWeb = ltrim(str_replace($webDir . '/', '', $file), '/');
+            if (in_array($relInWeb, self::RAW_FETCH_EXEMPT, true)) {
+                $src = $this->stripFrontendComments((string) file_get_contents($file));
+                // 双向断言的另一半：豁免文件必须真有裸调用，否则豁免已陈旧
+                foreach (self::RAW_FETCH_PATTERNS as $label => $pattern) {
+                    if (preg_match($pattern, $src)) {
+                        $exemptHit[$relInWeb] = true;
+                    }
+                }
+                continue;
+            }
+            if (str_contains((string) file_get_contents($file), '@audit-ignore frontend_raw_fetch')) {
+                continue;
+            }
+            // 全家桶继承页：相对路径在 radmin 真源树存在同路径文件 → 归属上游，不在宿主报
+            if ($radminWeb !== null && is_file($radminWeb . '/' . $relInWeb)) {
+                continue;
+            }
+            $src = $this->stripFrontendComments((string) file_get_contents($file));
+            $rel = str_replace($root . '/', '', $file);
+            foreach (self::RAW_FETCH_PATTERNS as $label => $pattern) {
+                if (preg_match($pattern, $src)) {
+                    $issues[] = "{$rel}: 裸 {$label}（调 admin API 走 createAxios——业务码信封拦截器是唯一出口；文件流下载走 /@/utils/download 的 downloadByToken/runDownload；确属例外请 @audit-ignore frontend_raw_fetch 并注明理由）";
+                }
+            }
+            $checked++;
+        }
+        // 豁免清单收敛断言：树里有豁免文件但一个裸调用都没有 → 豁免已陈旧
+        foreach (self::RAW_FETCH_EXEMPT as $exempt) {
+            if (!isset($exemptHit[$exempt]) && is_file($webDir . '/' . $exempt)) {
+                $issues[] = "$webDir/$exempt: 豁免文件已无裸 fetch/XHR 调用，请收敛 frontend_raw_fetch 豁免清单（例外清单双向断言）";
+            }
+        }
+        return ['issues' => $issues, 'checked' => $checked];
+    }
+
+    /**
+     * 剥前端源码注释（JS 单行/块注释 + HTML 注释），供裸调用正则扫描防自指假命中。
+     * 字符串字面量不剥（如 'https://x' 会被截短成 'https:，但只会减少可见文本、不会制造命中；
+     * 真命中（fetch( 形态）不会出现在合法字符串里。
+     */
+    protected function stripFrontendComments(string $src): string
+    {
+        $src = preg_replace('~<!--.*?-->~s', ' ', $src) ?? $src;
+        $src = preg_replace('~/\*.*?\*/~s', ' ', $src) ?? $src;
+        return preg_replace('~(?<!:)//[^\n]*~', ' ', $src) ?? $src;
     }
 
 

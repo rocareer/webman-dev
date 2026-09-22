@@ -1,3 +1,19 @@
+## [v3.29.0] - 2026-09-22
+
+### feat(audit): 新增 frontend_raw_fetch 规则——前端禁裸 fetch/XHR（业务码信封唯一出口）
+
+- **由来**：20260922 权限拒绝语义评估拍板「内部 API 保持 HTTP 200 + 业务码信封，禁绕信封」；
+  wh 走查 A3「导出假成功」实证裸 fetch 只看 res.ok 会把 HTTP 200+code 401 的错误 JSON 当
+  CSV 下载（绿 toast 打开全是 error_trace）。
+- **规则**：各包 web/src 与全域盲区（dev 宿主 web 树 + super/web/src，radmin 条目承载 sweep）
+  内 fetch( / new XMLHttpRequest 即报；剥离三类注释防自指假命中；utils/download.ts 与
+  utils/happClient.ts 豁免且双向断言（豁免文件无裸调用即报收敛）；radmin/web/src 同路径
+  「全家桶继承页」跳过（上游存量不由宿主修）；skyline 小程序无 fetch API 不扫。
+- **配套**：print-erp 主树 12 文件导出/打印全部迁移 utils/download.ts 单一真源
+  （downloadByToken/openByToken/runDownload），首扫 205 命中 → 主树清零
+  （余 193 全为 drill/sim/w1-w13 worktree 镜像，随同步波收敛）；规则清单
+  docs/audit-rules.md 重生成（23 条）。
+
 ## [v3.28.2] - 2026-09-22
 
 ### fix(audit): radmin_dev_audit_result 补 update_time 列（建表迁移漏列，落库即 42703）
