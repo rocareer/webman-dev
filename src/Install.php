@@ -61,13 +61,16 @@ class Install
     }
 
     /**
-     * 复制队列消费者模板到宿主（不覆盖宿主已改文件；缺文件时补齐）
+     * 复制队列消费者模板到宿主（**永不覆盖宿主已存在文件**，缺文件时补齐）。
+     * 不看 $isFirst：webman composer 安装器在 composer update 时同样走 install(isFirst=true)
+     * （2026-09-22 实证：v3.28.0 升级把 Rolling 宿主带 QueueConsume 记账的消费类覆盖回了裸模板），
+     * 「仅升级路径跳过」的守卫形同虚设——无条件跳过已存在文件才是真「缺失才写」。
      */
     protected static function installConsumers(bool $isFirst): void
     {
         foreach (static::$consumerFiles as $source => $dest) {
             $destPath = base_path() . '/' . $dest;
-            if (!$isFirst && is_file($destPath)) {
+            if (is_file($destPath)) {
                 continue;
             }
             $sourcePath = dirname(__DIR__) . '/' . $source;
@@ -99,8 +102,9 @@ class Install
     /**
      * 按 pathRelation 将插件配置复制到宿主项目（目标父目录不存在时自动创建）
      *
-     * 行为：首次安装全量拷贝；更新仅补齐缺失项——app.php 含 audit_root 用户可配项，
-     * 不覆盖宿主已有配置（与 radmin/ai 先例一致）。
+     * 行为：**目标已存在（目录/文件）一律跳过，缺失才补**——app.php 含 audit_root 用户可配项，
+     * 不覆盖宿主已有配置（与 radmin/ai 先例一致）。不看 $isFirst：webman composer 安装器在
+     * composer update 时同样走 install(isFirst=true)，按 flag 判「首装」会整目录重拷覆盖宿主配置。
      */
     protected static function installByRelation(bool $isFirst): void
     {
@@ -115,12 +119,12 @@ class Install
             $destPath = base_path() . '/' . $dest;
 
             if (is_dir($sourcePath)) {
-                if ($isFirst || !is_dir($destPath)) {
+                if (!is_dir($destPath)) {
                     static::copyDir($sourcePath, $destPath);
                     echo "Copy $dest\n";
                 }
             } elseif (is_file($sourcePath)) {
-                if ($isFirst || !is_file($destPath)) {
+                if (!is_file($destPath)) {
                     if (!is_dir(dirname($destPath))) {
                         mkdir(dirname($destPath), 0777, true);
                     }

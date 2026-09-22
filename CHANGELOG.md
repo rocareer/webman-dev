@@ -1,3 +1,15 @@
+## [v3.28.1] - 2026-09-22
+
+### fix(install): 接线落盘改「存在即跳过」——composer update 会以 install(isFirst=true) 重拷覆盖宿主
+
+- 实证：Rolling 宿主 `composer update rocareer/webman-dev`（v3.28.0）时 webman composer 安装器回调
+  `support\Plugin::install`（**isFirst=true**，不是 update()），`installConsumers` 的
+  `!$isFirst && is_file` 守卫被绕过——宿主带 QueueConsume 生命周期记账的
+  `app/queue/redis/CrudDesignConsumer.php` 被裸模板覆盖；`installByRelation` 的
+  `$isFirst ||` 同病，宿主 `config/plugin/rocareer/webman-dev/` 被整目录重拷。
+- 修复：两处落盘改为**目标已存在一律跳过、缺失才补**（与文档口径「缺失才写」对齐）；
+  $isFirst 参数保留签名兼容但不再参与判定。
+
 ## [v3.28.0] - 2026-09-22
 
 ### feat(audit): 「运行审计」可作业化（async=1），执行体抽取 runProjects 共享
