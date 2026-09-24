@@ -1,3 +1,20 @@
+## [v3.29.2] - 2026-09-24
+
+### 修复
+
+- **接线配置：安装不再覆盖宿主分叉 + 卸载不再整目录删**（install-standard §三/§四.3 合规）：
+  `uninstallByRelation()` 原为「整目录删」——宿主在 `config/plugin/rocareer/webman-dev/` 里的定制随包资产
+  一起消失，紧随的 `install()` 见目录不存在又全量铺包默认 ⇒ **宿主策略静默丢失**（2026-09-24 queue 包
+  实测事故：19 条队列塌进一个组、AgentGateway 契约闸拒绝 2454 条作业）。改法（与 rocareer/queue v1.8.7 同源）：
+  ① 安装写清单 `runtime/rocareer-webman-dev-install-manifest.json`（相对路径 => 投放时 md5，**只登记与包内
+  逐字节一致的文件**）；② 卸载**逐文件**按清单判 md5——宿主分叉与宿主自有文件一律保留并点名打印，
+  只回收空目录，无清单则整目录按「宿主拥有」处理；③ 落盘口径改为「**目标已存在即只补缺失文件，不看
+  `$isFirst`**」——宿主 composer 常把 post-package-update 接到 `support\Plugin::install`（恒传 true），
+  旧口径每次 update 都全量覆盖，宿主定制被静默抹掉。
+  安装侧补 else 分支：目标目录已存在时补齐包内新增文件（原为整目录跳过——标准明令禁止的旧语义）。
+- **验证**：沙箱 20 包 × 两种入口（`installByRelation(true/false)`）共 40 组断言全过——宿主分叉逐字节
+  存活、宿主自有文件保留、包内未改文件入清单并在卸载时精确删除、包内新增文件在更新时被补齐。
+
 ## [v3.29.1] - 2026-09-22
 
 ### fix(audit): 审计结果列表接 radmin 列表契约——列头排序（order）与高级检索（search）真生效
