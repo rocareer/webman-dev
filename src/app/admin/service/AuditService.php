@@ -643,9 +643,13 @@ class AuditService
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
         $out = '';
+        // **循环无关让出**（2026-09-26）：原 `\Workerman\Timer::sleep(0.05)` 只认 Fiber/Swoole，
+        // 其余循环落 `default => usleep` ⇒ 非协程循环（Select）下把整个进程冻住（本审计跑在
+        // `audit-run` 队列消费协程里，一次审计会轮询子进程很多次）。`Radmin\Async\Loop::sleep()`
+        // 在「非协程循环 + 身处协程」时走 `Timer::delay` + `suspend`，实测 Select 下真让出。
         $sleep = static function (): void {
-            if (class_exists(\Workerman\Timer::class)) {
-                \Workerman\Timer::sleep(0.05);
+            if (class_exists(\Radmin\Async\Loop::class)) {
+                \Radmin\Async\Loop::sleep(0.05);
             }
         };
         while (true) {
