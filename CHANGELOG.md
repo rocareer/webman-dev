@@ -1,3 +1,41 @@
+## [v3.30.0] - 2026-09-27
+
+### feat(ai): CRUD 设计链出回调档（`executeAsync()` 孪生 + 两档共用落账；同步档转回退路径）
+
+- **动机**：宿主 Rolling 的去协程化收口（用户裁定「全改成 回调 + 事件触发 event」）走到**生态包 vendor 面**——
+  `CrudDesignAgentService::callLlm()` 内的 `AgentGateway::chat()` 是该包**最后一处同步档 LLM 口**。
+  同步档要求 fiber 协程上下文（`AgentGateway::assertCoroutineContext()`），在回调档消费链 / 纯净 CLI 里
+  直接抛「上下文契约拒绝」；而包侧只能走同步口 ⇒ 该链在去协程宿主上要么被迫留协程、要么整链不可达。
+- **做法（与宿主侧刀 4/刀 5 同款「按 LLM 边界分段 + 两档共用收尾」）**：
+  - 新增 `executeAsync(string $requestId, callable $ok, callable $fail)`——消费者入口的回调档孪生；
+  - 新增 `buildDesignAsync()`（自修复轮从 `while` 变续体续跑，**轮数上限/回灌文案/判据全部同源**）与
+    `callLlmAsync()`（`chatAsync`，同 agentKey / 同 messages / 同 `max_tokens=16384` / 同 source+bizType）；
+  - 落账抽 **两档共用唯一实现**：`settleDesign()`（成功/校验不通过三分支，逐字搬移）与
+    `failDesign()`（失败 + happ 推送）；`execute()` 与 `executeAsync()` 只剩「等待方式」之差。
+- **失败语义逐条对位（同步档 → 回调档）**：LLM 失败/输出非法 ⇒ 服务侧落 `status=failed` + 推送后
+  **`$ok()`**（= 同步档 catch 后 `return`、消费类照常返回 = 队列 ack，**不进重试**）；`$fail` 只接
+  **收口环节自身**的意外（落库/推送抛出）⇒ 交队列重试/死信；续体内意外就地改道 `$fail`
+  （`asyncScope()` 只做队列标记携带、不套 `Async::guard`，回调里外抛会让延后收口槽悬挂到租约超时）。
+- **时限归调用方**：包侧不引宿主 `app\support\Async`——回调档下等待语义转移到续体，超时由宿主消费类包
+  （`CrudDesignConsumer::LLM_TIMEOUT = 600s`）。
+- **活体读数**（宿主 Rolling，`dev:crud-design-request --inline`，裸 Select 零 Fiber 脚手架；队列侧
+  同批 `--pause` 隔离以保归因）：3.2s 走通全链，草稿 `status=suggested`、`rounds=1`、设计 JSON 完整
+  （表/字段/枚举/表单分组齐备）；库中该队列 waiting 恒 1、active 0（证明队列侧未参与）。
+  该腿的价值即判据本身：CLI 主上下文（无 fiber）下若能走通，链上必无同步档调用——同步口会在
+  `assertCoroutineContext()` 处响亮抛出。
+- **未做（留档）**：
+  - `src/command/templates/consumer/CrudDesignConsumer.php` 模板**未改**（仍是同步 `execute()`）——
+    其他宿主未接 `rocareer/queue` 的 `AsyncConsumer`/延后收口，模板保持兼容；宿主自有的消费类副本
+    （Rolling `app/queue/redis/CrudDesignConsumer.php`）由各宿主按同一形态自升。
+  - 包侧同步档（`execute()`/`buildDesign()`/`callLlm()`）**保留为回退路径**，行内 `async-rule-exempt`
+    留痕；随「vendor 同步口删除」批次一起撤（届时需先确认各宿主已升消费类）。
+  - `embedding` 面**本包不涉及**（`AliyunDashScopeDriver` 的 `embedding()` 覆写面漂移在 rocareer/ai 仓，
+    不在本包）。
+
+### 补记
+
+- **v3.29.3 / v3.29.4 两条 tag 无对应条目**（历史事实，只记不改）——本次升版按 tag 线 `v3.29.4 → v3.30.0` 走。
+
 ## [v3.29.2] - 2026-09-24
 
 ### 修复

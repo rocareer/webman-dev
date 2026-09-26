@@ -4,8 +4,8 @@
  *
  * 形态（对齐 dataio MappingAgentService）：
  *   suggest（web/CLI，校验 + 落 pending 草稿 + 投递队列，立即返回 request_id）
- *   → CrudDesignConsumer → execute（协程）
- *   → AgentGateway::chat 一次性 LLM 调用（max_tokens=8192，JSON 输出）
+ *   → CrudDesignConsumer → execute()（同步档，回退路径）/ executeAsync()（**回调档**，2026-09-27）
+ *   → AgentGateway::chat / chatAsync 一次性 LLM 调用（max_tokens=16384，JSON 输出）
  *   → stripJsonFence → CrudDesignService::sanitize（反幻觉白名单）
  *     → ::validate（结构化错误）→ 不通过回灌错误让 LLM 自修复一轮
  *   → 落草稿 status=suggested + happ 推送
@@ -82,6 +82,10 @@ class CrudDesignAgentService
 
     /**
      * 消费者入口：调 LLM 产设计 → 净化校验 → 落草稿 → 推送
+     *
+     * **同步档**（回退路径）：宿主未走回调档（队列不在 `consumer.async_queues` / 消费类未实现
+     * `AsyncConsumer`）时走它。回调档孪生见 {@see self::executeAsync()}——两档共用
+     * {@see self::settleDesign()} / {@see self::failDesign()}（**同一份落库与推送**）。
      */
     public function execute(string $requestId): void
     {
@@ -93,18 +97,92 @@ class CrudDesignAgentService
         try {
             $result = $this->buildDesign($draft);
         } catch (Throwable $e) {
-            Log::channel('Radmin')->error('crud.design.failed', ['request_id' => $requestId, 'exception' => (string) $e]);
-            $draft->update([
-                'status' => CrudDesignDraft::STATUS_FAILED,
-                'errors' => ['message' => mb_substr($e->getMessage(), 0, 300)],
-            ]);
-            CrudDesignPusher::toAdmin((int) $draft->admin_id, CrudDesignPusher::EVENT_SUGGESTED, [
-                'request_id' => $requestId, 'ok' => false,
-                'error' => mb_substr($e->getMessage(), 0, 200),
-            ]);
+            $this->failDesign($draft, $requestId, $e);
+
             return;
         }
 
+        $this->settleDesign($draft, $requestId, $result);
+    }
+
+    /**
+     * 消费者入口（**回调档**，2026-09-27 去协程化收口）：与 {@see self::execute()} **逐字同源**——
+     * 同一份 `buildDesign*` 两档腿、同一份 {@see self::settleDesign()} / {@see self::failDesign()}，
+     * 差别只在等待方式：回调档下**返回 ≠ 完成**，收口由 `$ok`/`$fail` 决定（宿主消费类经
+     * `app\queue\service\DeferredAck` 延后 ack）。
+     *
+     * 失败语义与同步档同款：**LLM 失败 / 输出非法都在本类内落 `status=failed` + 推送，随后 `$ok()`**
+     * ——同步档那里 catch 后 `return`、消费类照常返回 = 队列 ack（不重试），两档必须一致。
+     * `$fail` 只接**收口环节自身**的意外（落库/推送抛出，罕见），那才交队列重试/死信。
+     *
+     * ★ 时限归调用方：回调档下等待语义从 HTTP 客户端转移到续体，宿主消费类包
+     * `app\support\Async::timeout()`；本层不自设时限（包侧不引宿主 `Async`）。
+     *
+     * @param callable $ok   `fn (): void`——任务真完成（含"业务失败已落账"）
+     * @param callable $fail `fn (\Throwable $e): void`——收口环节意外，交队列重试/死信
+     */
+    public function executeAsync(string $requestId, callable $ok, callable $fail): void
+    {
+        $draft = CrudDesignDraft::where('request_id', $requestId)->first();
+        if (!$draft || $draft->status !== CrudDesignDraft::STATUS_PENDING) {
+            $ok(); // 已终态/不存在：免做收口（与同步档 `return` 同口径）
+
+            return;
+        }
+
+        try {
+            $this->buildDesignAsync(
+                $draft,
+                fn (array $result) => $this->closeOut(fn () => $this->settleDesign($draft, $requestId, $result), $ok, $fail),
+                fn (Throwable $e) => $this->closeOut(fn () => $this->failDesign($draft, $requestId, $e), $ok, $fail)
+            );
+        } catch (Throwable $e) {
+            // 派发期意外（同步抛，如网关缺失）：与同步档外层 catch 同口径 —— 落 failed 后照常收口
+            $this->closeOut(fn () => $this->failDesign($draft, $requestId, $e), $ok, $fail);
+        }
+    }
+
+    /**
+     * 收口环节守卫（回调档专用）：业务落账已完成 ⇒ `$ok()`；落账自身抛出 ⇒ 交队列重试/死信。
+     */
+    private function closeOut(callable $work, callable $ok, callable $fail): void
+    {
+        try {
+            $work();
+        } catch (Throwable $e) {
+            $fail($e);
+
+            return;
+        }
+        $ok();
+    }
+
+    /**
+     * 失败落账（**两档共用**，唯一实现）：记日志 + 草稿置 failed + happ 推送。
+     *
+     * 注意调用方语义：同步档 catch 后直接 `return`、回调档随后 `$ok()` ——两档都**不进重试**
+     * （LLM 失败是业务态失败，草稿已留痕，重投只会再烧一次调用）。
+     */
+    protected function failDesign(CrudDesignDraft $draft, string $requestId, Throwable $e): void
+    {
+        Log::channel('Radmin')->error('crud.design.failed', ['request_id' => $requestId, 'exception' => (string) $e]);
+        $draft->update([
+            'status' => CrudDesignDraft::STATUS_FAILED,
+            'errors' => ['message' => mb_substr($e->getMessage(), 0, 300)],
+        ]);
+        CrudDesignPusher::toAdmin((int) $draft->admin_id, CrudDesignPusher::EVENT_SUGGESTED, [
+            'request_id' => $requestId, 'ok' => false,
+            'error' => mb_substr($e->getMessage(), 0, 200),
+        ]);
+    }
+
+    /**
+     * 成功/校验不通过的落账（**两档共用**，唯一实现）：三分支与改造前 `execute()` 内联代码逐字一致。
+     *
+     * @param array{design: array, errors: array, warnings: array, rounds: int} $result
+     */
+    protected function settleDesign(CrudDesignDraft $draft, string $requestId, array $result): void
+    {
         // 校验不通过：落失败草稿（保留 design 供人工参考/修改）
         if (!empty($result['errors'])) {
             $draft->update([
@@ -119,6 +197,7 @@ class CrudDesignAgentService
                 'request_id' => $requestId, 'ok' => false,
                 'error' => 'AI 设计未通过校验', 'errors' => $result['errors'],
             ]);
+
             return;
         }
 
@@ -233,11 +312,141 @@ class CrudDesignAgentService
     }
 
     /**
+     * 调 LLM 产设计 + 净化 + 校验（含自修复轮）——**回调档**
+     *
+     * 与 {@see self::buildDesign()} **逐字同源**：同一份提示词装配（`systemPrompt`/`userPrompt`）、
+     * 同一份 `decodeDesign`/`sanitize`/`validate`、同一份轮数上限 `MAX_ROUNDS` 与同一套回灌文案；
+     * 差别只在"下一轮"从 `while` 变成续体续跑（`$attempt` 自递归）。
+     *
+     * 续体自身抛出的异常（解析/校验的意外）**就地改道 `$fail`**——`AgentGateway` 的 `asyncScope`
+     * 只做队列标记携带、不套 `Async::guard`，回调里外抛会落进驱动的事件循环（消息会一直挂在
+     * deferred 槽上直到租约超时），故本层自己兜。
+     *
+     * @param callable $ok   `fn (array{design:array,errors:array,warnings:array,rounds:int} $result): void`
+     * @param callable $fail `fn (\Throwable $e): void`——LLM 腿失败（与同步档 `callLlm()` 抛出同口径）
+     */
+    protected function buildDesignAsync(CrudDesignDraft $draft, callable $ok, callable $fail): void
+    {
+        $designSvc = new CrudDesignService();
+        $agentKey = $draft->agent_key !== '' ? (string) $draft->agent_key : $this->defaultAgentKey();
+        $messages = [
+            ['role' => 'system', 'content' => $this->systemPrompt()],
+            ['role' => 'user', 'content' => $this->userPrompt((string) $draft->prompt, (string) $draft->table_name)],
+        ];
+
+        $lastDesign = [];
+        $lastErrors = [];
+        $lastWarnings = [];
+        $round = 0;
+
+        // 一轮 = 一次 LLM 调用 + 净化校验；未收敛且还有轮数 ⇒ 回灌错误续下一轮（= 同步档的 while）
+        $attempt = function () use (&$attempt, &$messages, &$lastDesign, &$lastErrors, &$lastWarnings, &$round, $designSvc, $agentKey, $ok, $fail): void {
+            $round++;
+            $this->callLlmAsync(
+                $agentKey,
+                $messages,
+                function (string $content) use (&$attempt, &$messages, &$lastDesign, &$lastErrors, &$lastWarnings, &$round, $designSvc, $ok, $fail): void {
+                    try {
+                        $decoded = $this->decodeDesign($content);
+                        if ($decoded === null) {
+                            // 非法 JSON：回灌要求只输出 JSON（文案同同步档）
+                            $lastErrors = [['field' => '', 'code' => 'LLM_BAD_JSON', 'message' => 'AI 输出不是合法 JSON']];
+                            $messages[] = ['role' => 'assistant', 'content' => mb_substr($content, 0, 2000)];
+                            $messages[] = ['role' => 'user', 'content' => '你的输出不是合法 JSON。请只输出一个 JSON 对象（设计态契约 v2），不要任何解释文字或代码围栏。'];
+                            $this->nextRoundOrClose($attempt, $round, $lastDesign, $lastErrors, $lastWarnings, $ok);
+
+                            return;
+                        }
+                        $san = $designSvc->sanitize($decoded);
+                        $lastDesign = $san['design'];
+                        $lastWarnings = $san['warnings'];
+                        $lastErrors = $designSvc->validate($san['design']);
+                        if (!$lastErrors) {
+                            $ok(['design' => $lastDesign, 'errors' => [], 'warnings' => $lastWarnings, 'rounds' => $round]);
+
+                            return;
+                        }
+                        // 回灌结构化错误让 LLM 自修复（文案同同步档）
+                        $messages[] = ['role' => 'assistant', 'content' => mb_substr($content, 0, 2000)];
+                        $messages[] = ['role' => 'user', 'content' => "设计存在以下问题，请修正后重新只输出完整 JSON：\n"
+                            . json_unicode($lastErrors, JSON_UNESCAPED_UNICODE)];
+                        $this->nextRoundOrClose($attempt, $round, $lastDesign, $lastErrors, $lastWarnings, $ok);
+                    } catch (Throwable $e) {
+                        // 续体内意外（净化/校验抛出）：与同步档"外抛 ⇒ 归失败"同口径
+                        $fail($e);
+                    }
+                },
+                $fail
+            );
+        };
+
+        $attempt();
+    }
+
+    /**
+     * 续轮闸（两档共用的**同一判据**）：还有轮数 ⇒ 续跑，用尽 ⇒ 按同步档 `while` 退出后的同一形态收口。
+     *
+     * @param callable $attempt 下一轮续体
+     * @param array<string, mixed> $design
+     * @param list<array<string, mixed>> $errors
+     * @param list<string> $warnings
+     * @param callable $ok `fn (array): void`
+     */
+    private function nextRoundOrClose(callable $attempt, int $round, array $design, array $errors, array $warnings, callable $ok): void
+    {
+        if ($round < self::MAX_ROUNDS) {
+            $attempt();
+
+            return;
+        }
+        $ok(['design' => $design, 'errors' => $errors, 'warnings' => $warnings, 'rounds' => $round]);
+    }
+
+    /**
+     * 单次 LLM 调用（**回调档**；一次性，JSON 输出）——与 {@see self::callLlm()} 同源同参
+     * （同一 `$agentKey` / `$messages` / `max_tokens=16384` / `source=queue` / `bizType=agent`）。
+     *
+     * 空串与同步档同口径：**归失败**（同步档抛 `RuntimeException`）——这里显式走 `$fail`，
+     * 不在续体里外抛（理由见 {@see self::buildDesignAsync()} 头注）。
+     *
+     * @param callable $ok   `fn (string $content): void`
+     * @param callable $fail `fn (\Throwable $e): void`
+     */
+    protected function callLlmAsync(string $agentKey, array $messages, callable $ok, callable $fail): void
+    {
+        $gatewayClass = '\\app\\agent\\support\\AgentGateway';
+        (new $gatewayClass())->chatAsync(
+            $agentKey,
+            $messages,
+            ['max_tokens' => 16384],
+            \app\agent\support\AgentGateway::SOURCE_QUEUE,   // 与同步档 'queue' 同值
+            \app\admin\service\AiRouterService::BIZ_AGENT,   // = 同步档 chat() 的缺省 bizType
+            '',
+            static function (array $out) use ($ok, $fail): void {
+                try {
+                    $content = (string) ($out['result']['choices'][0]['message']['content'] ?? '');
+                    if ($content === '') {
+                        throw new \RuntimeException('LLM 返回为空（content 空串，建议放大预算排查渠道）');
+                    }
+                    $ok($content);
+                } catch (Throwable $e) {
+                    $fail($e);
+                }
+            },
+            $fail
+        );
+    }
+
+    /**
      * 单次 LLM 调用（一次性，JSON 输出）
+     *
+     * **同步档 = 回退路径**：未开闸（队列不在 `consumer.async_queues`）/ 未迁宿主走它；
+     * 回退路径与 {@see self::callLlmAsync()} 同源同参。
      */
     protected function callLlm(string $agentKey, array $messages): string
     {
         $gatewayClass = '\\app\\agent\\support\\AgentGateway';
+        // async-rule-exempt: 同步档回退腿（回调档孪生 callLlmAsync() 已就位；全站收口时随 vendor 同步口一起撤）
         $response = (new $gatewayClass())->chat($agentKey, $messages, ['max_tokens' => 16384], 'queue');
         $content = (string) ($response['result']['choices'][0]['message']['content'] ?? '');
         if ($content === '') {
