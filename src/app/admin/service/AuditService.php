@@ -1512,7 +1512,7 @@ class AuditService
 
     /**
      * 常驻进程代码内同步阻塞 IO 检查（依据「异步铁律」沉淀规则，审计 2026-08-28 实战）：
-     *   1. 阻塞休眠：usleep(/sleep(（排除 Timer::sleep 封装与封装类自身）
+     *   1. 阻塞休眠：usleep(/sleep(（排除 Timer::sleep / Loop::sleep 封装与封装类自身）
      *   2. Redis 阻塞长拉：->brpop(
      *   3. curl_exec（同步）
      *   4. SMTP 同步发送：$mailer->send( / ->send($email)
@@ -1561,7 +1561,8 @@ class AuditService
                 }
                 // 阻塞休眠（排除 $var()/->/:: 方法形式与 function 声明；Timer 封装安全）
                 if (preg_match('~(?<![\w$:>-])(?:usleep|sleep)\s*\(~', $line) && !preg_match('~function\s+(?:usleep|sleep)~', $line)) {
-                    $issues[] = "$rel:$ln: 阻塞休眠 usleep/sleep（应使用 Workerman\Timer::sleep 挂起协程）";
+                    $issues[] = "$rel:$ln: 阻塞休眠 usleep/sleep（应使用 Radmin\Async\Loop::sleep 循环无关让出"
+                        . '——**不要用 Timer::sleep**：它在非协程循环下走 usleep 冻整进程）';
                 }
                 if (str_contains($line, '->brpop(')) {
                     $issues[] = "$rel:$ln: 同步 BRPOP 长拉（占死 worker；长轮询应改客户端驱动轮询）";
