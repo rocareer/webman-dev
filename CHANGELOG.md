@@ -1,3 +1,19 @@
+## [v3.30.1] - 2026-09-27
+
+### fix(ai): 同步档回退腿改走回调档 + `Loop::await`（`AgentGateway::chat()` 同步口删除批次）
+
+- **`CrudDesignAgentService::callLlm()`** 的 `(new $gatewayClass())->chat(...)` 改为 `chatAsync()` 派发 +
+  `Radmin\Async\Loop::await()` 挂起等待——等待语义与旧同步口逐字相同（挂起当前协程、回调 resume，
+  返回同一份 `$out`）；同 agentKey / 同 messages / 同 `max_tokens=16384` / 同 source `'queue'`，
+  bizType 与 modelOverride 按同步口缺省显式展开（`AiRouterService::BIZ_AGENT` / `''`）。
+  方法签名与返回值不变，`execute()` → `buildDesign()` 调用链零改动；行内 `async-rule-exempt` 留痕
+  随本次迁移删除（本包已无同步口调用点）。与 `callLlmAsync()` 同源同参，差别只在等待方式。
+- **同类扫描**：本包 `->chat(` / `->embed(` / `->chatStream(` / `->serve(` / `->speak(` / `->transcribe(`
+  全量复核，本处为最后一处同步口调用点（迁移后 0 命中）。
+- 边界（如实登记）：`Loop::await` 要求协程上下文（非协程**响亮拒绝**，与同步口
+  `assertCoroutineContext()` 同口径），且需宿主 radmin ≥ 5.12.0（`Radmin\Async\Loop`）；
+  包 composer 的 radmin 约束未随本版收紧。
+
 ## [v3.30.0] - 2026-09-27
 
 ### feat(ai): CRUD 设计链出回调档（`executeAsync()` 孪生 + 两档共用落账；同步档转回退路径）

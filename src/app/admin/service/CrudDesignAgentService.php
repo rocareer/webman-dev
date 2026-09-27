@@ -5,7 +5,7 @@
  * 形态（对齐 dataio MappingAgentService）：
  *   suggest（web/CLI，校验 + 落 pending 草稿 + 投递队列，立即返回 request_id）
  *   → CrudDesignConsumer → execute()（同步档，回退路径）/ executeAsync()（**回调档**，2026-09-27）
- *   → AgentGateway::chat / chatAsync 一次性 LLM 调用（max_tokens=16384，JSON 输出）
+ *   → AgentGateway::chatAsync 一次性 LLM 调用（max_tokens=16384，JSON 输出；execute() 腿经 Loop::await 挂起等待）
  *   → stripJsonFence → CrudDesignService::sanitize（反幻觉白名单）
  *     → ::validate（结构化错误）→ 不通过回灌错误让 LLM 自修复一轮
  *   → 落草稿 status=suggested + happ 推送
@@ -21,6 +21,7 @@
 namespace app\admin\service;
 
 use app\admin\model\CrudDesignDraft;
+use Radmin\Async\Loop;
 use Rocareer\WebmanDev\support\CrudDesignGenerator;
 use Rocareer\WebmanDev\support\CrudDesignService;
 use support\Log;
@@ -440,14 +441,27 @@ class CrudDesignAgentService
     /**
      * 单次 LLM 调用（一次性，JSON 输出）
      *
-     * **同步档 = 回退路径**：未开闸（队列不在 `consumer.async_queues`）/ 未迁宿主走它；
-     * 回退路径与 {@see self::callLlmAsync()} 同源同参。
+     * **等待方式 = 回调档 + `Loop::await`**（v3.30.1 起）：`AgentGateway::chat()` 同步口随
+     * 「同步口删除」批次删除，本方法改为 `chatAsync()` 派发 + `Radmin\Async\Loop::await()` 挂起等待
+     * （等待语义与旧同步口逐字相同：挂起当前协程、回调 resume，返回同一份 `$out`）；
+     * 与 {@see self::callLlmAsync()} 同源同参，差别只在等待方式。
      */
     protected function callLlm(string $agentKey, array $messages): string
     {
         $gatewayClass = '\\app\\agent\\support\\AgentGateway';
-        // async-rule-exempt: 同步档回退腿（回调档孪生 callLlmAsync() 已就位；全站收口时随 vendor 同步口一起撤）
-        $response = (new $gatewayClass())->chat($agentKey, $messages, ['max_tokens' => 16384], 'queue');
+        // 回调档 + Loop::await（同步口删除批次）：等待语义与旧同步口逐字相同
+        //（挂起当前协程、回调 resume；返回形状同一份 $out）
+        $gateway = new $gatewayClass();
+        $response = Loop::await(static fn (callable $done) => $gateway->chatAsync(
+            $agentKey,
+            $messages,
+            ['max_tokens' => 16384],
+            'queue',
+            \app\admin\service\AiRouterService::BIZ_AGENT,
+            '',
+            static fn (array $o) => $done($o),
+            static fn (\Throwable $e) => $done(null, $e),
+        ));
         $content = (string) ($response['result']['choices'][0]['message']['content'] ?? '');
         if ($content === '') {
             throw new \RuntimeException('LLM 返回为空（content 空串，建议放大预算排查渠道）');
