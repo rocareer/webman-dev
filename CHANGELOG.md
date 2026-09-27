@@ -1,3 +1,13 @@
+## [v3.30.2] - 2026-09-27
+
+### chore(deps): radmin 地板收紧至 ^5.12（Loop::await 依赖）
+
+- `composer.json`：`rocareer/radmin` `^3.1 || ^4.0 || ^5.0` → **`^5.12`**。v3.30.1 起本包
+  `CrudDesignAgentService::callLlm()` 已走 `Radmin\Async\Loop::await()`（同步口删除批次）——
+  该 `await()` 自 radmin **5.12.0** 才引入（`Loop` 类 5.11.0 引入）：旧区间允许 3.x–5.11，
+  composer 在锁旧 radmin 的宿主上会静默装上「有 `Loop` 类、没有 `await()`」（≤5.10 连类都没有）
+  的坏组合，收紧后由依赖求解期直接拒绝。
+
 ## [v3.30.1] - 2026-09-27
 
 ### fix(ai): 同步档回退腿改走回调档 + `Loop::await`（`AgentGateway::chat()` 同步口删除批次）
