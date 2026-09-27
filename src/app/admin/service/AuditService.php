@@ -5,6 +5,7 @@ namespace app\admin\service;
 use app\admin\model\DevAuditProject;
 use app\admin\model\DevAuditResult;
 use app\admin\model\DevAuditRule;
+use Workerman\Timer;
 
 /**
  * 工程质量审计引擎（webman-dev）
@@ -18,6 +19,15 @@ use app\admin\model\DevAuditRule;
  * 源码根目录约定：命令 --root 与后台 audit_root 配置都指向「包目录所在的 src 根」
  * （即同时含 radmin/、ai/ 等包目录的目录，工作区为 <Rocareer>/src）；自动探测兼容新旧布局
  * （工作区根 <Rocareer> 传入时自动落到 <Rocareer>/src）。
+ *
+ * **两条车道（2026-09-27 起）**：
+ *   - 同步档（CLI `rocareer:audit` / 后台页 / 未迁宿主）：{@see self::runProjects()}——php -l 子进程等待
+ *     在协程上下文走 `runAsync()`（`Loop::sleep` 让出），CLI 回退 `shell_exec`；
+ *   - 回调档（`audit-run` 队列，宿主 `coroutine_free_queues` 内联消费、不套 Fiber）：
+ *     {@see self::runProjectsAsync()}——子进程预取走 `runProcessAsync()`（Timer 驱动轮询：无 Fiber、
+ *     不冻事件循环），其余 20+ 规则与同步档跑同一份实现。
+ * 两档共用目标域解析（{@see self::projectScope()}）、命令构造（{@see self::syntaxCommand()}）与
+ * 输出解析（{@see self::parseSyntaxOutput()}）⇒ 终态（写库行 + 返回值）逐字一致。
  */
 class AuditService
 {
@@ -68,6 +78,18 @@ class AuditService
 
     /** 本轮已归属过迁移冲突的时间戳（避免全量审计重复报错） */
     protected array $reportedMigrationStamps = [];
+
+    /**
+     * 本轮预置的 php_syntax 结果（键 = 单元目录，与 {@see self::audit()} 的 `$dir` 同源）。
+     *
+     * 由 {@see self::runProjectsAsync()} 的子进程预取（{@see self::presetSyntaxAsync()}）写入；
+     * null = 未启用预取（CLI/后台/未迁宿主走同步档，行为与历史逐字一致）。预取命中时
+     * {@see self::checkPhpSyntax()} 直接返回、不再起子进程。
+     *
+     * **只在 runProjectsAsync 的一次调用内有效**：写入方以 try/finally 复位（常驻实例——
+     * MCP worker / 后台页——跨轮复用同一引擎，不复位会让改码后的下一轮读到过期语法快照）。
+     */
+    protected ?array $phpSyntaxPreset = null;
 
     /**
      * 源码布局（audit() 每轮按 root 判定；规则内 `src/` 前缀统一走 srcPath）：
@@ -380,33 +402,18 @@ class AuditService
      * 执行体可达分钟级（php -l 批量子进程为主）——子进程执行带 fiber 协程回退（本类内），
      * 挂在 fiber 事件循环的消费进程里可安全让出；失败抛 RuntimeException（消息即页面提示）。
      *
+     * 回调档孪生 = {@see self::runProjectsAsync()}（audit-run 队列单回调档收口用；Timer 驱动子进程
+     * 等待，无 Fiber）——本方法保留给 CLI/后台/未迁宿主，两档同产物。
+     *
      * @param array $projectIds 项目 id 白名单（空 = 全部启用项目）
      * @return array {run_at:int, total_issues:int, audited_projects:int, fail_projects:int, summary:list}
      * @throws \RuntimeException 没有可审计项目 / 未定位到源码根
      */
     public function runProjects(array $projectIds = []): array
     {
-        $query = DevAuditProject::where('status', DevAuditProject::STATUS_ENABLED);
-        if ($projectIds !== []) {
-            $query = $query->whereIn('id', $projectIds);
-        }
-        $projects = $query->get();
-        if (empty($projects)) {
-            throw new \RuntimeException('没有可审计的项目（请先添加/启用项目）');
-        }
-        // 启用中的规则 code（页面可停用规则临时缩小审计范围）
-        $codes = DevAuditRule::where('status', DevAuditRule::STATUS_ENABLED)->pluck('name')->all();
-        $root = $this->rootPath();
-        if ($root === '') {
-            throw new \RuntimeException('未定位到工作区源码根目录（含 radmin 的 src 根），请在插件配置 plugin.rocareer.webman-dev.app.audit_root 设置');
-        }
-        $pkgs = [];
-        $projectMap = [];
-        foreach ($projects as $p) {
-            $pkgs[] = $p->name;
-            $projectMap[$p->name] = $p;
-        }
-        $result = $this->audit($root, $pkgs, $codes);
+        $scope = $this->projectScope($projectIds);
+        $projectMap = $scope['projectMap'];
+        $result = $this->audit($scope['root'], $scope['pkgs'], $scope['codes']);
 
         $now = time();
         $summary = [];
@@ -463,6 +470,84 @@ class AuditService
             'fail_projects' => $failProjects,
             'summary' => $summary,
         ];
+    }
+
+    /**
+     * 解析一轮审计的目标域（项目 / 启用规则 / 源码根）——同步档与回调档**共用**，
+     * 避免两档各查一次库选到不同集合（同超级引擎「两档同源」纪律）。
+     *
+     * @param array $projectIds 项目 id 白名单（空 = 全部启用项目）
+     * @return array{projects:object,codes:array,root:string,pkgs:list<string>,projectMap:array,ids:list<int>}
+     * @throws \RuntimeException 没有可审计项目 / 未定位到源码根
+     */
+    protected function projectScope(array $projectIds = []): array
+    {
+        $query = DevAuditProject::where('status', DevAuditProject::STATUS_ENABLED);
+        if ($projectIds !== []) {
+            $query = $query->whereIn('id', $projectIds);
+        }
+        $projects = $query->get();
+        if (empty($projects)) {
+            throw new \RuntimeException('没有可审计的项目（请先添加/启用项目）');
+        }
+        // 启用中的规则 code（页面可停用规则临时缩小审计范围）
+        $codes = DevAuditRule::where('status', DevAuditRule::STATUS_ENABLED)->pluck('name')->all();
+        $root = $this->rootPath();
+        if ($root === '') {
+            throw new \RuntimeException('未定位到工作区源码根目录（含 radmin 的 src 根），请在插件配置 plugin.rocareer.webman-dev.app.audit_root 设置');
+        }
+        $pkgs = [];
+        $projectMap = [];
+        $ids = [];
+        foreach ($projects as $p) {
+            $pkgs[] = $p->name;
+            $projectMap[$p->name] = $p;
+            $ids[] = (int) $p->id;
+        }
+
+        return ['projects' => $projects, 'codes' => $codes, 'root' => $root, 'pkgs' => $pkgs, 'projectMap' => $projectMap, 'ids' => $ids];
+    }
+
+    /**
+     * 回调档执行体（`audit-run` 队列单回调档收口后的入口；与 {@see self::runProjects()} 同源同产物）
+     *
+     * 与同步档的**唯一差别 = php -l 子进程的等待方式**：本档先把各单元的语法检查经
+     * {@see self::runProcessAsync()}（Timer 驱动轮询：**无 Fiber、不冻事件循环**）预取成
+     * `$phpSyntaxPreset`，再复用同步主体 `runProjects()`（其 `checkPhpSyntax()` 命中预置即不再起
+     * 子进程）；其余 20+ 规则本就是纯文件扫描/DB 写，两档跑的是同一份实现 ⇒ 终态（写库行 + 返回值）
+     * 逐字一致。为什么要有本档：`audit-run` 队列要进 `coroutine_free_queues`（消费内联、不套 Fiber），
+     * 而同步档的 `runAsync()` 轮询靠 `Loop::sleep` 挂起（要求 Fiber 上下文）。
+     *
+     * 失败语义（与同步档对位，逐条留痕）：
+     *   - 目标域解析失败（无项目/无根）⇒ `$fail`（同同步档抛 RuntimeException）；
+     *   - 起不了子进程 / 等待超时 ⇒ `$fail`（同步档对 `proc_open` 失败按空输出处理，属既有 fail-open
+     *     行为，**本档有意收紧为显式失败**——审计结论不能建在「没跑成」上）；
+     *   - 主体（写库等）异常 ⇒ `$fail`（同同步档上抛）。
+     *
+     * @param array $projectIds 项目 id 白名单（空 = 全部启用项目）
+     * @param callable $ok   `fn (array $summary): void`（与 runProjects 返回同形）
+     * @param callable $fail `fn (\Throwable $e): void`
+     */
+    public function runProjectsAsync(array $projectIds, callable $ok, callable $fail): void
+    {
+        try {
+            $scope = $this->projectScope($projectIds);
+        } catch (\Throwable $e) {
+            $fail($e);
+
+            return;
+        }
+        $this->presetSyntaxAsync($scope['root'], $scope['projects'], function (array $preset) use ($scope, $ok, $fail): void {
+            $prev = $this->phpSyntaxPreset;
+            $this->phpSyntaxPreset = $preset;
+            try {
+                $ok($this->runProjects($scope['ids']));
+            } catch (\Throwable $e) {
+                $fail($e);
+            } finally {
+                $this->phpSyntaxPreset = $prev; // 常驻实例跨轮复用：预取快照绝不出本次调用
+            }
+        }, $fail);
     }
 
     /**
@@ -612,12 +697,33 @@ class AuditService
 
     protected function checkPhpSyntax(string $root, string $pkg, string $dir): array
     {
+        // 回调档预取命中（runProjectsAsync → presetSyntaxAsync）：同轮两档共用同一份子进程产物
+        if ($this->phpSyntaxPreset !== null && isset($this->phpSyntaxPreset[$dir])) {
+            return $this->phpSyntaxPreset[$dir];
+        }
         $files = $this->phpFiles($dir);
-        $cmd = 'find ' . escapeshellarg($dir) . " -name '*.php' -not -path '*/vendor/*' -print0 2>/dev/null | xargs -0 -P" . $this->syntaxJobs() . " -n1 php -l 2>&1";
+        $cmd = $this->syntaxCommand($dir);
         // 常驻进程（webman worker）内禁止阻塞式子进程等待：fiber 协程上下文走非阻塞轮询，CLI 回退同步
         $out = class_exists(\Workerman\Coroutine::class) && \Workerman\Coroutine::isCoroutine()
             ? $this->runAsync($cmd)
             : (string) shell_exec($cmd);
+        return $this->parseSyntaxOutput($out, $files);
+    }
+
+    /** php -l 批量命令（两档共用；单独成方法防两档命令形态漂移） */
+    protected function syntaxCommand(string $dir): string
+    {
+        return 'find ' . escapeshellarg($dir) . " -name '*.php' -not -path '*/vendor/*' -print0 2>/dev/null | xargs -0 -P" . $this->syntaxJobs() . " -n1 php -l 2>&1";
+    }
+
+    /**
+     * 语法检查输出解析（两档共用）：逐行判定，非空且非「No syntax errors」即计入问题文件
+     *
+     * @param list<string> $files 该单元扫描到的 php 文件（note 计数用）
+     * @return array{issues:list<string>,note:string}
+     */
+    protected function parseSyntaxOutput(string $out, array $files): array
+    {
         $bad = [];
         foreach (explode("\n", $out) as $line) {
             $line = trim($line);
@@ -628,6 +734,122 @@ class AuditService
             $bad[] = basename($line);
         }
         return ['issues' => $bad, 'note' => count($files) . ' files'];
+    }
+
+    /**
+     * 语法检查的回调档孪生：子进程等待走 {@see self::runProcessAsync()}（Timer 驱动，无 Fiber）
+     *
+     * @param callable $ok   `fn (array{issues:list<string>,note:string} $result): void`
+     * @param callable $fail `fn (\Throwable $e): void`
+     */
+    protected function checkPhpSyntaxAsync(string $root, string $pkg, string $dir, callable $ok, callable $fail): void
+    {
+        $files = $this->phpFiles($dir);
+        $this->runProcessAsync($this->syntaxCommand($dir), function (string $out) use ($files, $ok): void {
+            $ok($this->parseSyntaxOutput($out, $files));
+        }, $fail);
+    }
+
+    /**
+     * 预取各单元的 php -l 结果（回调链逐单元串行；单单元内部已是 `xargs -P` 并行批量子进程）
+     *
+     * @param iterable $projects 启用项目行（取 name）
+     * @param callable $ok   `fn (array<string,array> $preset): void`（键 = 单元目录，与 audit() 的 $dir 同源）
+     * @param callable $fail `fn (\Throwable $e): void`
+     */
+    protected function presetSyntaxAsync(string $root, iterable $projects, callable $ok, callable $fail): void
+    {
+        $dirs = [];
+        foreach ($projects as $p) {
+            $dirs[] = $this->pkgDir($root, (string) $p->name);
+        }
+        $preset = [];
+        $i = 0;
+        $step = null;
+        $step = function () use (&$step, &$preset, &$i, $dirs, $root, $ok, $fail): void {
+            if ($i >= count($dirs)) {
+                $ok($preset);
+
+                return;
+            }
+            $dir = $dirs[$i++];
+            if (!is_dir($dir)) {
+                $step(); // 目录缺失交给 audit() 的「覆盖失败」分支报出，本档不重复报
+
+                return;
+            }
+            $this->checkPhpSyntaxAsync($root, basename($dir), $dir, function (array $result) use (&$preset, &$step, $dir): void {
+                $preset[$dir] = $result;
+                $step();
+            }, $fail);
+        };
+        $step();
+    }
+
+    /**
+     * 回调式子进程执行（Timer 驱动轮询：**无 Fiber / 不冻事件循环**，供 `coroutine_free_queues` 消费链使用）
+     *
+     * 与 {@see self::runAsync()} 的分工：那条是「同步签名 + 协程让出」（轮询里的 `Loop::sleep` 要求
+     * Fiber 上下文，非协程下会响亮拒绝）；本条的等待是事件循环定时器，**Select 主上下文同样可用**——
+     * `audit-run` 队列据此可进 `coroutine_free_queues`（消费内联、不套 Fiber）。
+     * 要求调用方身处**有事件循环**的进程（队列消费 / worker）；CLI 同步路径不走本方法。
+     *
+     * @param callable $ok   `fn (string $out): void`（stdout + stderr 合并，与同步档同口径）
+     * @param callable $fail `fn (\Throwable $e): void`
+     * @param float    $timeout 单次等待上限（秒）；到点终止子进程后 `$fail`
+     */
+    protected function runProcessAsync(string $cmd, callable $ok, callable $fail, float $timeout = 300.0): void
+    {
+        $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $proc = @proc_open($cmd, $descriptors, $pipes);
+        if (!is_resource($proc)) {
+            $fail(new \RuntimeException('子进程启动失败（proc_open 不可用或被禁用）'));
+
+            return;
+        }
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+        $out = '';
+        $deadline = microtime(true) + $timeout;
+        $timerId = null;
+        try {
+            $timerId = Timer::add(0.05, function () use (&$timerId, &$out, $pipes, $proc, $ok, $fail, $deadline, $timeout): void {
+                $out .= (string) stream_get_contents($pipes[1]) . (string) stream_get_contents($pipes[2]);
+                $status = proc_get_status($proc);
+                if ($status['running']) {
+                    if (microtime(true) <= $deadline) {
+                        return; // 未到点：留给下一拍
+                    }
+                    Timer::del($timerId);
+                    $this->closeProcess($proc, $pipes, true);
+                    $fail(new \RuntimeException('子进程等待超时（' . $timeout . 's）'));
+
+                    return;
+                }
+                Timer::del($timerId);
+                $out .= (string) stream_get_contents($pipes[1]) . (string) stream_get_contents($pipes[2]);
+                $this->closeProcess($proc, $pipes, false);
+                $ok($out);
+            });
+        } catch (\Throwable $e) {
+            // 无事件循环（CLI/console）等：Timer::add 当场抛 ⇒ 显式失败，不留悬挂子进程
+            $this->closeProcess($proc, $pipes, true);
+            $fail($e);
+        }
+    }
+
+    /** 关闭子进程资源（`runProcessAsync` 收尾两处共用；$terminate=true 先终止） */
+    protected function closeProcess($proc, array $pipes, bool $terminate): void
+    {
+        if ($terminate) {
+            @proc_terminate($proc);
+        }
+        foreach ($pipes as $pipe) {
+            if (is_resource($pipe)) {
+                fclose($pipe);
+            }
+        }
+        @proc_close($proc);
     }
 
     /**

@@ -1,3 +1,26 @@
+## [v3.31.0] - 2026-09-27
+
+### feat(audit): 子进程等待出回调档（`runProjectsAsync` / Timer 驱动，`audit-run` 队列可免 Fiber）
+
+- **`AuditService` 新增回调档执行体** `runProjectsAsync(array $projectIds, callable $ok, callable $fail)`
+  ——与同步档 `runProjects()` **同源同产物**：共用目标域解析（新增 `projectScope()`，两档同一份实现
+  免得选到不同集合）、命令构造（新增 `syntaxCommand()`）、输出解析（新增 `parseSyntaxOutput()`）；
+  其余 20+ 规则两档跑的是同一份代码。唯一差别 = php -l 子进程的**等待方式**：本档先经新增的
+  `presetSyntaxAsync()`/`checkPhpSyntaxAsync()` 把各单元语法检查预取成 `$phpSyntaxPreset`
+  （子进程等待走新增的 `runProcessAsync()`：`proc_open` + **`Timer` 驱动轮询**，无 Fiber、
+  不冻事件循环），再复用同步主体（`checkPhpSyntax()` 命中预置即不再起子进程）。
+- 动因：宿主 `audit-run` 队列要进 `coroutine_free_queues`（消费内联、不套 Fiber），而同步档
+  `runAsync()` 的轮询靠 `Loop::sleep` 挂起（要求 Fiber 上下文，内联下响亮拒绝）。
+- 新增 `closeProcess()`（收尾两处共用）；`phpSyntaxPreset` 属性只在一次 `runProjectsAsync`
+  调用内有效（`try/finally` 复位——常驻实例 MCP worker / 后台页跨轮复用不会读到过期语法快照）。
+- **同步档零行为变更**：`runProjects()` / `audit()` / `checkPhpSyntax()` 的签名与产物不变，
+  CLI `rocareer:audit` 与后台页照旧（`checkPhpSyntax()` 主体仅抽出命令/解析两段，判据不变）。
+- 失败语义（异步档；与同步档逐条对位留痕）：目标域解析失败 ⇒ `$fail`（同同步档抛 RuntimeException）；
+  起不了子进程 / 等待超时（缺省 300s/单元）⇒ `$fail`（**本档有意收紧**：同步档对 `proc_open`
+  失败按空输出处理属既有 fail-open，未改）；主体（写库等）异常 ⇒ `$fail`（同同步档上抛）。
+- 首次调用方：Rolling 宿主 `audit-run` 消费类（单回调档 + `Async::timeout` 1500s < 队列租约 1800s）
+  与该宿主的 `dev:audit-async-probe`（无 Fiber 活体 + 两档逐单元读数全等对照）。
+
 ## [v3.30.2] - 2026-09-27
 
 ### chore(deps): radmin 地板收紧至 ^5.12（Loop::await 依赖）
