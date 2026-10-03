@@ -113,9 +113,10 @@ const baTable: baTableClass = new baTableClass(
                 width: '300',
                 render: 'buttons',
                 buttons: [
-                    ...defaultOptButtons(['edit']),
+                    ...defaultOptButtons(['edit']).map((btn) => ({ ...btn, attr: { link: true } })),
                     {
                         render: 'tipButton',
+                        attr: { link: true },
                         name: 'run',
                         title: '运行审计',
                         text: '',
@@ -128,6 +129,7 @@ const baTable: baTableClass = new baTableClass(
                     },
                     {
                         render: 'tipButton',
+                        attr: { link: true },
                         name: 'switch',
                         title: '启停',
                         text: '',
@@ -140,6 +142,7 @@ const baTable: baTableClass = new baTableClass(
                     },
                     {
                         render: 'confirmButton',
+                        attr: { link: true },
                         name: 'delete',
                         title: '删除',
                         text: '',

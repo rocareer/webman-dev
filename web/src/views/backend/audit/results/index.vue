@@ -17,7 +17,7 @@
                 <el-option label="未通过" value="0" />
                 <el-option label="通过" value="1" />
             </el-select>
-            <el-button type="primary" plain @click="loadRuns">刷新轮次</el-button>
+            <el-button v-blur type="primary" plain @click="loadRuns">刷新轮次</el-button>
         </div>
 
         <!-- 表格顶部菜单 -->
@@ -46,7 +46,7 @@
                 <el-empty v-else description="该规则无问题明细（通过/未执行）" :image-size="80" />
             </el-scrollbar>
             <template #footer>
-                <el-button @click="detailVisible = false">关闭</el-button>
+                <el-button v-blur @click="detailVisible = false">关闭</el-button>
             </template>
         </el-dialog>
     </div>
@@ -122,6 +122,7 @@ const baTable: baTableClass = new baTableClass(
                 buttons: [
                     {
                         render: 'tipButton',
+                        attr: { link: true },
                         name: 'detail',
                         title: '详情',
                         text: '',

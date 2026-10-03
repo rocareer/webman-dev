@@ -1,3 +1,12 @@
+## [v3.31.1] - 2026-10-03
+
+### fix(views): audit 后台页面按钮视觉标准归一（print-erp-w13 第十六轮域外 321 处归一轮，audit 域 12 处）
+
+- projects/rules 操作列按钮对象补 `attr: { link: true }`（defaultOptButtons(['edit']) 改 `.map` 包 link）；
+  results 操作列「详情」补 attr link；results 刷新轮次/关闭与两处 popupForm 取消按钮补 `v-blur`——口径同
+  rocareer 全家桶按钮标准（R1/R5），`@click`/接口/权限判据零改动。席位与 radmin 总装树副本已按本版刷平
+  （逐字节一致）。
+
 ## [v3.31.0] - 2026-09-27
 
 ### feat(audit): 子进程等待出回调档（`runProjectsAsync` / Timer 驱动，`audit-run` 队列可免 Fiber）

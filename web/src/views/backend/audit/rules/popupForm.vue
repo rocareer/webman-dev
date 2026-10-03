@@ -55,7 +55,7 @@
         </el-scrollbar>
         <template #footer>
             <div :style="'width: calc(100% - ' + baTable.form.labelWidth! / 1.8 + 'px)'">
-                <el-button @click="baTable.toggleForm('')">{{ t('Cancel') }}</el-button>
+                <el-button v-blur @click="baTable.toggleForm('')">{{ t('Cancel') }}</el-button>
                 <el-button v-blur :loading="baTable.form.submitLoading" @click="submitForm" type="primary">
                     {{ t('Save') }}
                 </el-button>
