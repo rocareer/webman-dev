@@ -1,3 +1,19 @@
+## [v3.31.2] - 2026-10-10
+
+### feat(design): 收尾出组口 `settle_queue`——CRUD 设计回调档收尾数据工可投队出组（缺省零行为变化）
+
+- **缘起（宿主用户令「io 全移走」·宿主红线 44 收尾出组律）**：`crud-design` 队列在宿主 llm 组——回调档
+  LLM 腿（含两轮自修复）完成后的一切收尾（草稿落账 `settleDesign`/`failDesign` = update + happ 推送）
+  此前内联在 llm 组消费进程。本刀开收尾出组口；宿主翻档后收尾改投队（非 llm 组）回放。
+- **件**（`CrudDesignAgentService`）：① `settleQueue()` 口读宿主 `plugin.rocareer.webman-dev.app.settle_queue`
+  （缺省 `''` = 内联逐字）；② `executeAsync()` 两条落账回调经 `settleDispatch()` 唯一裁决——非空投队
+  （载荷 `{op, request_id, result|error_class+error_msg}`；异常对象不入载荷，类名/消息在派发期固化），
+  **投递失败 fail-open 退回内联**（宁占槽不丢收尾）；③ `settleApply()` 静态回放入口——**只解包 + 幂等闸**
+  （草稿非 pending 即跳过，迟到重投空转；落账实现仍唯一在 `settleDesign`/`failDesign`，不复制）；
+  ④ 配置面 `src/config/plugin/rocareer/webman-dev/app.php` 增 `settle_queue` 键（真源回归随 Install 落盘宿主）。
+- **未配置 = 原路逐字，零行为变化**；宿主侧（Rolling 仓同批）：settle 消费者 + 探针；翻档 = `settle_queue`
+  指向该队列 + restart。
+
 ## [v3.31.1] - 2026-10-03
 
 ### fix(views): audit 后台页面按钮视觉标准归一（print-erp-w13 第十六轮域外 321 处归一轮，audit 域 12 处）

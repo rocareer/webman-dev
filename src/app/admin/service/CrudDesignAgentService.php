@@ -8,7 +8,8 @@
  *   → AgentGateway::chatAsync 一次性 LLM 调用（max_tokens=16384，JSON 输出；execute() 腿经 Loop::await 挂起等待）
  *   → stripJsonFence → CrudDesignService::sanitize（反幻觉白名单）
  *     → ::validate（结构化错误）→ 不通过回灌错误让 LLM 自修复一轮
- *   → 落草稿 status=suggested + happ 推送
+ *   → 落草稿 status=suggested + happ 推送（**收尾出组分流**：宿主 `settle_queue` 配置非空时本步
+ *     投 settle 队列回放——LLM 腿完成即出 llm 组；缺省 `''` = 内联逐字，零行为变化）
  *   → confirm（人工确认，唯一出码入口）→ CrudDesignGenerator 落盘出码
  *
  * 红线（三层表达，同 dataio）：
@@ -119,6 +120,10 @@ class CrudDesignAgentService
      * ★ 时限归调用方：回调档下等待语义从 HTTP 客户端转移到续体，宿主消费类包
      * `app\support\Async::timeout()`；本层不自设时限（包侧不引宿主 `Async`）。
      *
+     * ★ 收尾分流（2026-10-10）：两条落账回调经 {@see self::settleDispatch()} 唯一裁决——
+     * 缺省（`settle_queue` 空）内联逐字；宿主翻档后投队，`$ok()` 先于落账发生（落账由 settle
+     * 队列回放 {@see self::settleApply()}），本队列即可移出 llm 组。
+     *
      * @param callable $ok   `fn (): void`——任务真完成（含"业务失败已落账"）
      * @param callable $fail `fn (\Throwable $e): void`——收口环节意外，交队列重试/死信
      */
@@ -134,12 +139,12 @@ class CrudDesignAgentService
         try {
             $this->buildDesignAsync(
                 $draft,
-                fn (array $result) => $this->closeOut(fn () => $this->settleDesign($draft, $requestId, $result), $ok, $fail),
-                fn (Throwable $e) => $this->closeOut(fn () => $this->failDesign($draft, $requestId, $e), $ok, $fail)
+                fn (array $result) => $this->closeOut(fn () => $this->settleDispatch('ok', $draft, $requestId, $result), $ok, $fail),
+                fn (Throwable $e) => $this->closeOut(fn () => $this->settleDispatch('fail', $draft, $requestId, [], $e), $ok, $fail)
             );
         } catch (Throwable $e) {
             // 派发期意外（同步抛，如网关缺失）：与同步档外层 catch 同口径 —— 落 failed 后照常收口
-            $this->closeOut(fn () => $this->failDesign($draft, $requestId, $e), $ok, $fail);
+            $this->closeOut(fn () => $this->settleDispatch('fail', $draft, $requestId, [], $e), $ok, $fail);
         }
     }
 
@@ -156,6 +161,53 @@ class CrudDesignAgentService
             return;
         }
         $ok();
+    }
+
+    /**
+     * 收尾队列名（出组分流开关；`''` = 内联逐字，缺省）。真源 = 宿主
+     * `config/plugin/rocareer/webman-dev/app.php` 的 `settle_queue`（宿主侧翻档 = 配值 + restart）。
+     */
+    protected static function settleQueue(): string
+    {
+        return (string) config('plugin.rocareer.webman-dev.app.settle_queue', '');
+    }
+
+    /**
+     * 收尾分流（**收尾出组律**，2026-10-10）：LLM 腿完成后的落账数据工（草稿 update + happ 推送）
+     * 缺省内联逐字；`settle_queue` 非空 ⇒ **投队**回放（{@see self::settleApply()}——本方法所在
+     * 消费进程即刻 `$ok()` 收口，落账转由 settle 队列进程执行）。**投递失败 fail-open 退回内联**
+     * ——宁占槽不丢收尾。
+     *
+     * 异常对象不入队列载荷：类名 + 消息（截断 2000）在派发期固化，回放期按同口径重建
+     * （`failDesign` 只用 `getMessage()`，`settleDesign` 只要纯数组——载荷即全部语义）。
+     *
+     * @param array{design?: array, errors?: array, warnings?: array, rounds?: int} $result op=ok 时的产物
+     */
+    protected function settleDispatch(string $op, CrudDesignDraft $draft, string $requestId, array $result, ?Throwable $e = null): void
+    {
+        if ($op === 'fail' && $e === null) {
+            throw new \InvalidArgumentException('settleDispatch: op=fail 缺异常');
+        }
+        $queue = self::settleQueue();
+        if ($queue !== '') {
+            $msg = ['op' => $op, 'request_id' => $requestId];
+            if ($op === 'ok') {
+                $msg['result'] = $result;
+            } else {
+                $msg['error_class'] = $e::class;
+                $msg['error_msg'] = mb_substr($e->getMessage(), 0, 2000);
+            }
+            if (Redis::send($queue, $msg)) {
+                return;
+            }
+            Log::channel('Radmin')->warning('crud.design.settle_dispatch_failed', ['request_id' => $requestId, 'queue' => $queue]);
+        }
+        if ($op === 'ok') {
+            $this->settleDesign($draft, $requestId, $result);
+
+            return;
+        }
+        $this->failDesign($draft, $requestId, $e);
     }
 
     /**
@@ -221,6 +273,39 @@ class CrudDesignAgentService
             'table' => (string) ($result['design']['table']['name'] ?? ''),
             'warnings' => $result['warnings'],
         ]);
+    }
+
+    /**
+     * 收尾回放（settle 队列消费者唯一入口）：**只做解包 + 幂等闸**，落账实现仍唯一在
+     * {@see self::settleDesign()} / {@see self::failDesign()}（不复制）。
+     *
+     * 幂等（at-least-once）：草稿非 pending 即跳过（与 {@see self::executeAsync()} 头闸同口径）——
+     * 迟到重投/重复投递在已终态草稿上空转，绝不把已确认/已弃用草稿打回。崩溃窗口（update 后、
+     * happ 推送前）只丢提醒帧一枚，草稿状态已持久、后台可查。
+     *
+     * @param array<string, mixed> $m {op: 'ok'|'fail', request_id: string, result?: array, error_msg?: string, error_class?: string}
+     */
+    public static function settleApply(array $m): void
+    {
+        $op = (string) ($m['op'] ?? '');
+        $requestId = (string) ($m['request_id'] ?? '');
+        if ($requestId === '' || ($op !== 'ok' && $op !== 'fail')) {
+            throw new \InvalidArgumentException('crud 收尾载荷非法：' . json_unicode($m, JSON_UNESCAPED_UNICODE));
+        }
+        $draft = CrudDesignDraft::where('request_id', $requestId)->first();
+        if (!$draft || $draft->status !== CrudDesignDraft::STATUS_PENDING) {
+            return; // 已终态/不存在：重放幂等跳过
+        }
+        $svc = new static();
+        if ($op === 'ok') {
+            $svc->settleDesign($draft, $requestId, (array) ($m['result'] ?? []));
+
+            return;
+        }
+        $class = (string) ($m['error_class'] ?? '');
+        $svc->failDesign($draft, $requestId, ($class !== '' && class_exists($class) && is_a($class, Throwable::class, true))
+            ? new $class((string) ($m['error_msg'] ?? '未记录错误'))
+            : new \RuntimeException((string) ($m['error_msg'] ?? '未记录错误')));
     }
 
     /**
