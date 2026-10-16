@@ -1138,7 +1138,10 @@ class AuditService
             if (basename($f) === 'AuditService.php') {
                 continue; // 审计引擎自身含探测器模式字面量（TODO|FIXME|HACK 正则），自扫必误报
             }
-            $todo += preg_match_all('~(TODO|FIXME|HACK)~', file_get_contents($f));
+            // 计数**边界化**（2026-10-17 自宿主补丁收编上游）：痕迹标记仅在与标识符字符无邻接时计——
+            //   `TODO_STATUSES` 这类合法标识符子串、`HACKED` 这类词形不再误报；`// TODO:` / `/* FIXME */`
+            //   / `HACK:` 等真实痕迹形态不受影响。
+            $todo += preg_match_all('~(?<![A-Za-z0-9_])(?:TODO|FIXME|HACK)(?![A-Za-z0-9_])~', file_get_contents($f));
         }
         if ($todo > 0) {
             $issues[] = "$todo TODO/FIXME/HACK in src";
@@ -1900,6 +1903,15 @@ class AuditService
             }
             if (preg_match('~/(middleware|process|validate|upload|support)/~', $def['rel'])) {
                 continue; // 中间件/自定义进程/验证器/上传驱动/框架支撑类：配置或 alias/容器字符串引用，静态无法判定
+            }
+            // 路径段豁免（**配置驱动**：`plugin.rocareer.webman-dev.app.audit_exempt_path_segments`）——某些目录的类
+            // 按 **DB 行**注册（FQCN 字符串如 `AdversarialArms::scorer()` 运行时解析），字符不落文件 ⇒ 静态扫描原理上
+            // 扫不到，逐件补 `@audit-ignore dead_code` 属可复发形态。**缺省空数组 = 旧行为逐字不变**；宿主按需配置
+            // （例：`['/adv/']` —— 路径段精确匹配，`advance/`、`advice/` 不含该段者仍照常判定）。
+            foreach ((array) config('plugin.rocareer.webman-dev.app.audit_exempt_path_segments', []) as $seg) {
+                if ((string) $seg !== '' && str_contains($def['rel'], (string) $seg)) {
+                    continue 2;
+                }
             }
             $fqcn = $def['fqcn'];
             if ($this->rootClassRefs($root)['refs'][$fqcn] ?? false) {

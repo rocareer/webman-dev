@@ -1,3 +1,19 @@
+## [v3.31.3] - 2026-10-17
+
+### fix(audit)+feat(audit): residue 计数边界化（误报修）· 死类检测路径段豁免改**配置驱动**（机制入包 · 策略留宿主）
+
+- **residue 误报修**（收编自宿主补丁 `webman-dev-20261008-residue-marker-boundary`）：`TODO|FIXME|HACK`
+  计数**边界化**——仅在与标识符字符无邻接时计（`TODO_STATUSES` 这类合法标识符子串、`HACKED` 这类词形
+  不再误报；`// TODO:` / `/* FIXME */` / `HACK:` 等真实痕迹形态不受影响）。
+- **死类检测路径段豁免 → 配置驱动**（替代宿主补丁 `webman-dev-20261011-adv-path-exempt` 写死的 `/adv/`）：
+  新增 `plugin.rocareer.webman-dev.app.audit_exempt_path_segments`（**缺省 `[]` = 旧行为逐字不变**）——
+  某些目录的类按 **DB 行**注册（FQCN 字符串如 `AdversarialArms::scorer()` 运行时解析），字符不落文件 ⇒
+  静态扫描原理上扫不到，逐件补 `@audit-ignore dead_code` 属可复发形态。命中规则 = `str_contains($rel, $段)`。
+- **口径**：机制入包（本包只提供配置口）、**策略留宿主**（工作区在宿主 `config/plugin/rocareer/webman-dev/app.php`
+  配 `['/adv/']`）；Install 的 `copyMissingFiles` 只补缺失、不覆盖既有 ⇒ 宿主配置持久。
+- 与宿主（Rolling `rocareer/rolling`）同批收口：两条补丁文件删除 + `composer.json` 条目移除 +
+  `patches.lock.json` 重锁 ⇒ 宿主补丁目录对 webman-dev 零留痕。
+
 ## [v3.31.2] - 2026-10-10
 
 ### feat(design): 收尾出组口 `settle_queue`——CRUD 设计回调档收尾数据工可投队出组（缺省零行为变化）
